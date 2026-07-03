@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crest Pharmacies — Locum Payments</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#0D47A1; --navy-deep:#0A3A85; --navy-ink:#082E68;
+  --accent:#4F88E4; --accent-soft:#EAF1FC;
+  --bg:#F4F7FC; --card:#FFFFFF; --border:#DCE3EF; --border-light:#E9EEF6;
+  --green:#1E9E5A; --red:#D7382B; --amber:#B45309;
+  --shadow:0 1px 2px rgba(13,47,104,.05),0 2px 10px rgba(13,47,104,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#1b2537;font-family:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;font-size:16px;-webkit-font-smoothing:antialiased}
+.top{background:var(--navy);color:#fff;padding:14px 18px;display:flex;align-items:center;gap:12px}
+.top img{height:34px;width:34px;border-radius:8px;background:#fff;padding:3px}
+.top .t1{font-weight:800;font-size:16px;letter-spacing:.2px}
+.top .t2{font-size:12px;opacity:.85}
+.wrap{max-width:560px;margin:0 auto;padding:16px 14px 60px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:18px;margin-top:14px}
+h2{margin:2px 0 6px;font-size:20px;color:var(--navy-ink)}
+h3{margin:18px 0 6px;font-size:16px;color:var(--navy-ink)}
+p.sub{color:#59647d;margin:0 0 6px;font-size:14px}
+label{display:block;font-weight:700;margin:16px 0 6px;font-size:14.5px;color:var(--navy-ink)}
+input[type=text],input[type=email],input[type=tel],input[type=number],select,textarea{
+  width:100%;padding:13px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:16px;background:#fff;font-family:inherit}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);border-color:var(--accent)}
+.hint{color:#59647d;font-size:13px;margin:4px 0 0;line-height:1.45}
+.warn{background:#FFF7ED;border:1px solid #FDBA74;color:var(--amber);border-radius:10px;padding:10px 12px;font-size:13.5px;margin-top:8px}
+.days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:10px}
+.day{padding:11px 0;text-align:center;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;user-select:none;font-size:15px;background:#fff;font-weight:600}
+.day.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.hourrow{display:flex;align-items:center;gap:12px;margin-top:10px}
+.hourrow .d{width:96px;font-weight:700;color:var(--navy-ink)}
+.hourrow input{width:120px}
+.mblock{border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-top:14px;background:#FBFCFF}
+.err{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;border-radius:10px;padding:12px;margin:14px 0;display:none;font-size:14.5px;line-height:1.6}
+.btn{background:var(--navy);color:#fff;border:0;padding:16px;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;margin-top:22px;width:100%;font-family:inherit}
+.btn:active{background:var(--navy-deep)}
+.btn[disabled]{opacity:.55}
+.btn.green{background:var(--green)}
+.btn.red{background:var(--red)}
+.btn2{background:#fff;color:var(--navy);border:1.5px dashed var(--accent);padding:12px 16px;border-radius:10px;cursor:pointer;margin-top:12px;font-size:15px;font-weight:600;font-family:inherit;width:100%}
+.check{display:flex;gap:10px;align-items:flex-start;margin:12px 0;font-size:14.5px}
+.check input{width:20px;height:20px;margin-top:1px;flex:none}
+.total{font-size:18px;margin-top:16px;color:var(--navy-ink)}
+.kv{width:100%;margin:8px 0;font-size:15px}
+.kv td{padding:5px 0;vertical-align:top}
+.kv td:first-child{color:#59647d;padding-right:14px;white-space:nowrap}
+table.grid{border-collapse:collapse;width:100%;margin-top:6px;font-size:14.5px}
+table.grid th,table.grid td{border:1px solid var(--border);padding:7px 10px;text-align:left}
+table.grid th{background:var(--accent-soft);color:var(--navy-ink)}
+.banner{border-radius:12px;padding:14px;font-size:15px;margin-top:14px}
+.banner.info{background:var(--accent-soft);color:var(--navy-ink)}
+.banner.good{background:#DCFCE7;color:#14532D}
+.banner.bad{background:#FEE2E2;color:#991B1B}
+.flag{color:var(--amber);margin:4px 0}
+.center{text-align:center}
+.bigref{font-size:26px;font-weight:800;color:var(--navy);letter-spacing:.5px}
+.spin{display:inline-block;width:22px;height:22px;border:3px solid var(--accent-soft);border-top-color:var(--navy);border-radius:50%;animation:sp .8s linear infinite;vertical-align:middle}
+@keyframes sp{to{transform:rotate(360deg)}}
+.foot{margin-top:34px;color:#8a93a8;font-size:12.5px;text-align:center}
+details{margin-top:14px}
+summary{cursor:pointer;color:var(--red);font-weight:700;font-size:15px}
+</style>
+</head>
+<body>
+<div class="top">
+  <img id="logo" alt="Crest Pharmacies" src="data:image/png;base64,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">
+  <div><div class="t1">Crest Pharmacies</div><div class="t2">Locum Payments</div></div>
+</div>
+<div class="wrap">
+  <div id="app"><div class="card center"><p><span class="spin"></span></p><p class="hint">Loading…</p></div></div>
+  <div class="foot">Crest Pharmacies · Locum Payments · Questions: head office</div>
+</div>
+
+<script>
+var API_URL = '__API_URL__';
+
+var $app = document.getElementById('app');
+function h(html){ $app.innerHTML = html; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function money(n){ return Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,','); }
+function ordinal(d){ var s=['th','st','nd','rd'],v=d%100; return d+(s[(v-20)%10]||s[v]||s[0]); }
+
+// --- API (plain fetch; no Google cookies cross-origin => no account glitch) ---
+function apiGet(params){
+  var q = Object.keys(params).map(function(k){return k+'='+encodeURIComponent(params[k])}).join('&');
+  return fetch(API_URL+'?'+q).then(function(r){return r.text()}).then(JSON.parse);
+}
+function apiPost(body){
+  return fetch(API_URL,{method:'POST',body:JSON.stringify(body)}).then(function(r){return r.text()}).then(JSON.parse);
+}
+function fatal(msg){
+  h('<div class="card"><div class="banner bad">'+esc(msg)+'</div>'+
+    '<button class="btn" onclick="location.reload()">Try again</button></div>');
+}
+
+// --- router ---
+var TOKEN = new URLSearchParams(location.search).get('token');
+if (API_URL.indexOf('__')===0){
+  fatal('Setup not finished: the API URL has not been configured yet.');
+} else if (TOKEN){ reviewPage(TOKEN); } else { formPage(); }
+
+// ===========================================================================
+// LOCUM FORM
+// ===========================================================================
+var META=null, blockN=0;
+
+function formPage(){
+  apiGet({action:'meta'}).then(function(meta){
+    if(!meta.ok) return fatal('Could not load the form. Please try again in a minute.');
+    META=meta; renderForm();
+  }).catch(function(){ fatal('No connection — check your signal and try again.'); });
+}
+
+function renderForm(){
+  h(
+  '<div class="card" id="formwrap">'+
+  '<h2>Locum payment claim</h2>'+
+  '<p class="sub">Fill this in after your shifts. Your claim goes to the pharmacy validator you select, and once approved it is passed to accounts for payment.</p>'+
+  '<div class="err" id="errbox"></div>'+
+  '<label>Full name</label><input type="text" id="f_name" autocomplete="name">'+
+  '<label>Email address</label><input type="email" id="f_email" autocomplete="email">'+
+  '<p class="hint">Your confirmation and payment updates go here — double-check it.</p>'+
+  '<label>Phone number</label><input type="tel" id="f_phone" autocomplete="tel">'+
+  '<label>Role you worked</label><select id="f_role"><option value="">— select —</option><option>Pharmacist</option><option>Dispenser</option><option>Driver</option><option>Other</option></select>'+
+  '<div id="gphc_wrap" style="display:none"><label>GPhC registration number</label><input type="text" id="f_gphc" inputmode="numeric" maxlength="7"><p class="hint">7 digits.</p></div>'+
+  '<div id="other_wrap" style="display:none"><label>Describe the work</label><input type="text" id="f_roleother"></div>'+
+  '<div class="check"><input type="checkbox" id="f_indem"><span>I confirm I hold valid professional indemnity insurance</span></div>'+
+  '<div class="check"><input type="checkbox" id="f_rtw"><span>I confirm I have the right to work in the UK</span></div>'+
+  '<label>Pharmacy you worked at</label><select id="f_pharmacy"><option value="">— select —</option></select>'+
+  '<label>Who should validate this claim?</label><select id="f_validator"><option value="">— select pharmacy first —</option></select>'+
+  '<div class="warn">⚠️ Your payment cannot be processed unless the correct validator is selected. If unsure, ask the pharmacy.</div>'+
+  '<label>Agreed rate (£ per hour)</label><input type="number" id="f_rate" step="0.01" min="1" inputmode="decimal">'+
+  '<p class="hint" id="ratehint"></p>'+
+  '<div id="months"></div>'+
+  '<button type="button" class="btn2" id="addmonth">+ Add another month</button>'+
+  '<div class="total" id="total"></div>'+
+  '<h3>Payment details</h3>'+
+  '<p class="hint">Only seen by accounts — never by the validator.</p>'+
+  '<label>Account holder name</label><input type="text" id="f_bankname">'+
+  '<label>Sort code (6 digits)</label><input type="text" id="f_sort" inputmode="numeric" maxlength="8">'+
+  '<label>Account number (8 digits)</label><input type="text" id="f_acct" inputmode="numeric" maxlength="8">'+
+  '<label>Confirm account number</label><input type="text" id="f_acct2" inputmode="numeric" maxlength="8">'+
+  '<label>Anything else we should know? (optional)</label><textarea id="f_notes" rows="2"></textarea>'+
+  '<button type="button" class="btn" id="submitbtn">Submit claim</button>'+
+  '</div>');
+
+  var $=function(id){return document.getElementById(id)};
+  META.pharmacies.forEach(function(p){var o=document.createElement('option');o.textContent=p;$('f_pharmacy').appendChild(o)});
+  $('f_pharmacy').onchange=function(){
+    var v=$('f_validator');v.innerHTML='';
+    var list=META.validators[this.value]||[];
+    if(!list.length){v.innerHTML='<option>Head Office</option>';return;}
+    if(list.length>1){var d=document.createElement('option');d.value='';d.textContent='— select —';v.appendChild(d);}
+    list.forEach(function(n){var o=document.createElement('option');o.textContent=n;v.appendChild(o)});
+  };
+  $('f_role').onchange=function(){
+    var r=this.value;
+    $('gphc_wrap').style.display=(r==='Pharmacist')?'block':'none';
+    $('other_wrap').style.display=(r==='Other')?'block':'none';
+    var def=META.rates[r];
+    if(def){$('f_rate').value=def;$('ratehint').textContent='National basic rate for '+r+' is £'+def+'/hr — change it if you agreed a different rate (the validator checks it).';}
+    else{$('f_rate').value='';$('ratehint').textContent=(r==='Other')?'No default rate for Other — enter the agreed rate.':'';}
+    recalc();
+  };
+  $('f_rate').oninput=recalc;
+  $('addmonth').onclick=addMonthBlock;
+  $('submitbtn').onclick=submit;
+  addMonthBlock();
+}
+
+function addMonthBlock(){
+  if(document.querySelectorAll('.mblock').length>=META.months.length)return;
+  var i=blockN++;
+  var div=document.createElement('div');div.className='mblock';div.id='mb'+i;
+  var opts=META.months.map(function(m){return '<option data-max="'+m.maxDay+'">'+esc(m.label)+'</option>'}).join('');
+  div.innerHTML='<label style="margin-top:2px">Month</label><select id="mm'+i+'">'+opts+'</select>'+
+    '<label>Tap every day you worked</label><div class="days" id="md'+i+'"></div>'+
+    '<div id="mh'+i+'"></div>'+
+    (i>0?'<button type="button" class="btn2" onclick="removeBlock('+i+')">Remove this month</button>':'');
+  document.getElementById('months').appendChild(div);
+  document.getElementById('mm'+i).onchange=function(){buildDays(i)};
+  buildDays(i);
+}
+function removeBlock(i){var el=document.getElementById('mb'+i);el.parentNode.removeChild(el);recalc();}
+function buildDays(i){
+  var sel=document.getElementById('mm'+i);
+  var max=Number(sel.options[sel.selectedIndex].getAttribute('data-max'));
+  var grid=document.getElementById('md'+i);grid.innerHTML='';
+  document.getElementById('mh'+i).innerHTML='';
+  for(var d=1;d<=max;d++){(function(d){
+    var b=document.createElement('div');b.className='day';b.textContent=d;
+    b.onclick=function(){b.classList.toggle('on');toggleHour(i,d,b.classList.contains('on'))};
+    grid.appendChild(b);
+  })(d);}
+  recalc();
+}
+function toggleHour(i,d,on){
+  var wrap=document.getElementById('mh'+i);var id='h'+i+'_'+d;
+  if(on){
+    var row=document.createElement('div');row.className='hourrow';row.id='r'+id;
+    row.innerHTML='<span class="d">'+ordinal(d)+'</span><input type="number" id="'+id+'" step="0.25" min="0.25" max="24" placeholder="hours" inputmode="decimal">';
+    var ins=null;[].slice.call(wrap.children).forEach(function(r){var dd=Number(r.id.split('_')[1]);if(dd>d&&!ins)ins=r;});
+    wrap.insertBefore(row,ins);
+    var inp=document.getElementById(id);inp.oninput=recalc;
+    var prev=wrap.querySelector('input');if(prev&&prev.value&&!inp.value)inp.value=prev.value;
+    inp.focus();
+  } else { var row=document.getElementById('r'+id);if(row)row.parentNode.removeChild(row); }
+  recalc();
+}
+function collectMonths(){
+  var out=[];
+  document.querySelectorAll('.mblock').forEach(function(div){
+    var i=div.id.slice(2);var label=document.getElementById('mm'+i).value;var entries=[];
+    div.querySelectorAll('.hourrow input').forEach(function(inp){entries.push({day:Number(inp.id.split('_')[1]),hours:Number(inp.value)});});
+    out.push({label:label,entries:entries});
+  });
+  return out;
+}
+function recalc(){
+  var el=document.getElementById('total');if(!el)return;
+  var rate=Number((document.getElementById('f_rate')||{}).value)||0;var th=0;
+  collectMonths().forEach(function(m){m.entries.forEach(function(e){if(e.hours>0)th+=e.hours});});
+  el.innerHTML=th?('<b>Total: '+th+' hours'+(rate?(' × £'+rate+'/hr = £'+money(th*rate)):'')+'</b>'):'';
+}
+function showErrors(msgs){
+  var b=document.getElementById('errbox');
+  b.innerHTML='<b>Please fix:</b><br>'+msgs.map(function(m){return '• '+esc(m)}).join('<br>');
+  b.style.display='block';window.scrollTo({top:0,behavior:'smooth'});
+}
+function submit(){
+  var $=function(id){return document.getElementById(id)};
+  var e=[];
+  if(!$('f_name').value.trim())e.push('Full name');
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($('f_email').value.trim()))e.push('A valid email address');
+  if(!$('f_phone').value.trim())e.push('Phone number');
+  var role=$('f_role').value;if(!role)e.push('Role');
+  if(role==='Pharmacist'&&!/^\d{7}$/.test($('f_gphc').value.trim()))e.push('GPhC number (7 digits) — required for pharmacists');
+  if(!$('f_indem').checked)e.push('Indemnity insurance confirmation');
+  if(!$('f_rtw').checked)e.push('Right-to-work confirmation');
+  if(!$('f_pharmacy').value)e.push('Pharmacy');
+  if(!$('f_validator').value)e.push('Validator');
+  var rate=Number($('f_rate').value);if(!(rate>0))e.push('Rate (£/hr)');
+  var months=collectMonths();var anyDays=false;
+  months.forEach(function(m){
+    if(!m.entries.length)e.push('No days ticked for '+m.label);
+    m.entries.forEach(function(en){anyDays=true;if(!(en.hours>0&&en.hours<=24))e.push('Hours for the '+ordinal(en.day)+' ('+m.label+')')});
+  });
+  if(!anyDays&&months.length)e.push('Tick at least one day');
+  var sort=$('f_sort').value.replace(/[\s-]/g,'');
+  if(!/^\d{6}$/.test(sort))e.push('Sort code (exactly 6 digits)');
+  if(!/^\d{8}$/.test($('f_acct').value.trim()))e.push('Account number (exactly 8 digits)');
+  if($('f_acct').value.trim()!==$('f_acct2').value.trim())e.push('Account number and confirmation must match');
+  if(!$('f_bankname').value.trim())e.push('Account holder name');
+  if(e.length){showErrors(e);return;}
+  document.getElementById('errbox').style.display='none';
+  var btn=$('submitbtn');btn.disabled=true;btn.textContent='Submitting…';
+  var payload={name:$('f_name').value.trim(),email:$('f_email').value.trim(),phone:$('f_phone').value.trim(),
+    role:role,roleOther:$('f_roleother').value.trim(),gphc:$('f_gphc').value.trim(),
+    pharmacy:$('f_pharmacy').value,validatorName:$('f_validator').value,rate:rate,months:months,
+    bankName:$('f_bankname').value.trim(),sort:sort,acct:$('f_acct').value.trim(),acct2:$('f_acct2').value.trim(),
+    notes:$('f_notes').value.trim()};
+  apiPost({action:'submit',payload:payload}).then(function(res){
+    if(!res.ok){showErrors(res.errors||[res.message||'Something went wrong — try again.']);btn.disabled=false;btn.textContent='Submit claim';return;}
+    h('<div class="card center"><h2>✅ Claim submitted</h2>'+
+      '<p>Your reference is</p><p class="bigref">'+esc(res.ref)+'</p>'+
+      '<p>Total claimed: <b>£'+esc(res.total)+'</b> ('+esc(String(res.hours))+' hours)</p>'+
+      '<div class="banner info">'+esc(res.validator)+' has been asked to validate it. A confirmation email is on its way to <b>'+esc(payload.email)+'</b> — check spam the first time.</div>'+
+      '<button class="btn" onclick="location.reload()">Submit another claim</button></div>');
+    window.scrollTo(0,0);
+  }).catch(function(){
+    showErrors(['No connection — your claim was NOT submitted. Check your signal and press Submit again.']);
+    btn.disabled=false;btn.textContent='Submit claim';
+  });
+}
+
+// ===========================================================================
+// VALIDATOR REVIEW
+// ===========================================================================
+function reviewPage(token){
+  apiGet({action:'claim',token:token}).then(function(c){
+    if(!c.ok){
+      if(c.code==='processed') return h('<div class="card"><div class="banner info">Claim <b>'+esc(c.ref)+'</b> was already <b>'+esc(c.status)+'</b>'+(c.decidedAt?' on '+new Date(c.decidedAt).toLocaleString('en-GB'):'')+'.</div><p class="hint">No further action is needed. Nothing has been sent twice.</p></div>');
+      if(c.code==='expired') return h('<div class="card"><div class="banner bad">This link has expired.</div><p class="hint">Ask the locum to resubmit, or contact head office.</p></div>');
+      return h('<div class="card"><div class="banner bad">This link is not valid.</div><p class="hint">The claim may have been removed. Contact head office if unexpected.</p></div>');
+    }
+    renderReview(token,c);
+  }).catch(function(){ fatal('No connection — check your signal and try again.'); });
+}
+
+function renderReview(token,c,errMsg){
+  var monthRows=c.split.rows.map(function(r){
+    return '<tr><td>'+esc(r.label)+'</td><td>'+r.daysCount+'</td><td>'+r.hours+'</td><td>£'+money(r.amount)+'</td></tr>';
+  }).join('');
+  var daysDetail=c.months.map(function(b){
+    var ds=b.days.map(function(d){return d+' ('+b.hours[String(d)]+'h)'}).join(', ');
+    return '<p style="margin:4px 0"><b>'+esc(b.label)+':</b> '+esc(ds)+'</p>';
+  }).join('');
+  var flags=(c.flags||[]).map(function(f){return '<p class="flag">⚠️ '+esc(f)+'</p>'}).join('');
+
+  h('<div class="card">'+
+    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
+    '<h2>Locum claim '+esc(c.ref)+'</h2>'+
+    '<p class="sub">Please check every detail. Approving sends this claim to accounts for payment.</p>'+
+    '<table class="kv">'+
+    '<tr><td>Locum</td><td><b>'+esc(c.locum.name)+'</b><br>'+esc(c.locum.email)+' · '+esc(c.locum.phone)+'</td></tr>'+
+    '<tr><td>Role</td><td>'+esc(c.role)+(c.roleOther?' — '+esc(c.roleOther):'')+(c.gphc?'<br>GPhC '+esc(c.gphc):'')+'</td></tr>'+
+    '<tr><td>Pharmacy</td><td>'+esc(c.pharmacy)+' ('+esc(c.company)+')</td></tr>'+
+    '<tr><td>Rate</td><td>£'+money(c.rate)+'/hr'+(c.defaultRate!=null?' <span class="hint">(national default £'+money(c.defaultRate)+')</span>':' <span class="flag">(no default for this role — confirm)</span>')+'</td></tr>'+
+    '<tr><td>Total</td><td><b>£'+money(c.split.totalAmount)+'</b> · '+c.split.totalHours+' hours</td></tr>'+
+    (c.notes?'<tr><td>Notes</td><td>'+esc(c.notes)+'</td></tr>':'')+
+    '</table>'+
+    '<h3>Days & hours claimed</h3>'+daysDetail+
+    '<h3>Month split</h3>'+
+    '<table class="grid"><tr><th>Month</th><th>Days</th><th>Hours</th><th>Amount</th></tr>'+monthRows+'</table>'+
+    (flags?'<h3>Check these</h3>'+flags:'')+
+    '<p class="hint" style="margin-top:14px">Bank details are not shown here — accounts receive them after your approval. Nothing is paid until you approve.</p>'+
+    '<button class="btn green" id="approvebtn">✅ Approve — send to accounts</button>'+
+    '<details><summary>Reject this claim…</summary>'+
+    '<label>Reason (required — the locum sees this and resubmits)</label>'+
+    '<textarea id="rejreason" rows="3"></textarea>'+
+    '<button class="btn red" id="rejectbtn">Reject with this reason</button>'+
+    '</details>'+
+    '</div>');
+
+  document.getElementById('approvebtn').onclick=function(){ decide(token,'approve','',c); };
+  document.getElementById('rejectbtn').onclick=function(){
+    var reason=document.getElementById('rejreason').value.trim();
+    if(!reason){renderReview(token,c,'A reason is required to reject — the locum needs to know what to fix.');return;}
+    decide(token,'reject',reason,c);
+  };
+}
+
+function decide(token,action,reason,c){
+  var ab=document.getElementById('approvebtn'),rb=document.getElementById('rejectbtn');
+  if(ab)ab.disabled=true; if(rb)rb.disabled=true;
+  (action==='approve'?ab:rb).textContent='Working…';
+  apiPost({action:action,token:token,reason:reason}).then(function(res){
+    if(!res.ok){
+      if(res.code==='processed') return h('<div class="card"><div class="banner info">Claim <b>'+esc(res.ref)+'</b> was already <b>'+esc(res.status)+'</b>. Nothing has been sent twice.</div></div>');
+      return renderReview(token,c,res.message||'Something went wrong — try again.');
+    }
+    if(res.status==='APPROVED'){
+      h('<div class="card center"><h2>✅ Approved</h2>'+
+        '<div class="banner good"><b>'+esc(res.ref)+'</b> approved. Accounts have been sent the full claim for payment, and '+esc(res.locum)+' has been told it is approved.</div>'+
+        '<p class="hint">You will receive a receipt email for your records. You can close this page.</p></div>');
+    } else {
+      h('<div class="card center"><h2>Claim rejected</h2>'+
+        '<div class="banner info"><b>'+esc(res.ref)+'</b> rejected. '+esc(res.locum)+' has been emailed the reason and can resubmit a corrected claim.</div>'+
+        '<p class="hint">You will receive a receipt email for your records. You can close this page.</p></div>');
+    }
+    window.scrollTo(0,0);
+  }).catch(function(){ renderReview(token,c,'No connection — nothing was changed. Check your signal and try again.'); });
+}
+</script>
+</body>
+</html>
