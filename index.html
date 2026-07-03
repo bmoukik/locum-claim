@@ -134,7 +134,7 @@ function renderForm(){
   '<div class="check"><input type="checkbox" id="f_rtw"><span>I confirm I have the right to work in the UK</span></div>'+
   '<label>Pharmacy you worked at</label><select id="f_pharmacy"><option value="">— select —</option></select>'+
   '<label>Who should validate this claim?</label><select id="f_validator"><option value="">— select pharmacy first —</option></select>'+
-  '<div class="warn">⚠️ Your payment cannot be processed unless the correct validator is selected. If unsure, ask the pharmacy.</div>'+
+  '<div class="warn">Important: your payment cannot be processed unless the correct validator is selected. If unsure, ask the pharmacy.</div>'+
   '<label>Agreed rate (£ per hour)</label><input type="number" id="f_rate" step="0.01" min="1" inputmode="decimal">'+
   '<p class="hint">Enter the rate you agreed with the pharmacy — the validator checks it.</p>'+
   '<div id="months"></div>'+
@@ -282,7 +282,7 @@ function submit(){
     notes:$('f_notes').value.trim()};
   apiPost({action:'submit',payload:payload}).then(function(res){
     if(!res.ok){showErrors(res.errors||[res.message||'Something went wrong — try again.']);btn.disabled=false;btn.textContent='Submit claim';return;}
-    h('<div class="card center"><h2>✅ Claim submitted</h2>'+
+    h('<div class="card center"><h2>Claim submitted</h2>'+
       '<p>Your reference is</p><p class="bigref">'+esc(res.ref)+'</p>'+
       '<p>Total claimed: <b>£'+esc(res.total)+'</b> ('+esc(String(res.hours))+' hours)</p>'+
       '<div class="banner info">'+esc(res.validator)+' has been asked to validate it. A confirmation email is on its way to <b>'+esc(payload.email)+'</b> — check spam the first time.</div>'+
@@ -316,7 +316,7 @@ function renderReview(token,c,errMsg){
     var ds=b.days.map(function(d){return d+' ('+b.hours[String(d)]+'h)'}).join(', ');
     return '<p style="margin:4px 0"><b>'+esc(b.label)+':</b> '+esc(ds)+'</p>';
   }).join('');
-  var flags=(c.flags||[]).map(function(f){return '<p class="flag">⚠️ '+esc(f)+'</p>'}).join('');
+  var flags=(c.flags||[]).map(function(f){return '<p class="flag">'+esc(f)+'</p>'}).join('');
 
   h('<div class="card">'+
     (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
@@ -335,7 +335,7 @@ function renderReview(token,c,errMsg){
     '<table class="grid"><tr><th>Month</th><th>Days</th><th>Hours</th><th>Amount</th></tr>'+monthRows+'</table>'+
     (flags?'<h3>Check these</h3>'+flags:'')+
     '<p class="hint" style="margin-top:14px">Bank details are not shown here — accounts receive them after your approval. Nothing is paid until you approve.</p>'+
-    '<button class="btn green" id="approvebtn">✅ Approve — send to accounts</button>'+
+    '<button class="btn green" id="approvebtn">Approve — send to accounts</button>'+
     '<details><summary>Reject this claim…</summary>'+
     '<label>Reason (required — the locum sees this and resubmits)</label>'+
     '<textarea id="rejreason" rows="3"></textarea>'+
@@ -361,7 +361,7 @@ function decide(token,action,reason,c){
       return renderReview(token,c,res.message||'Something went wrong — try again.');
     }
     if(res.status==='APPROVED'){
-      h('<div class="card center"><h2>✅ Approved</h2>'+
+      h('<div class="card center"><h2>Approved</h2>'+
         '<div class="banner good"><b>'+esc(res.ref)+'</b> approved. Accounts have been sent the full claim for payment, and '+esc(res.locum)+' has been told it is approved.</div>'+
         '<p class="hint">You will receive a receipt email for your records. You can close this page.</p></div>');
     } else {
