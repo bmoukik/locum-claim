@@ -131,13 +131,12 @@ function renderForm(){
   '<label>Role you worked</label><select id="f_role"><option value="">— select —</option><option>Pharmacist</option><option>Dispenser</option><option>Driver</option><option>Other</option></select>'+
   '<div id="gphc_wrap" style="display:none"><label>GPhC registration number</label><input type="text" id="f_gphc" inputmode="numeric" maxlength="7"><p class="hint">7 digits.</p></div>'+
   '<div id="other_wrap" style="display:none"><label>Describe the work</label><input type="text" id="f_roleother"></div>'+
-  '<div class="check"><input type="checkbox" id="f_indem"><span>I confirm I hold valid professional indemnity insurance</span></div>'+
   '<div class="check"><input type="checkbox" id="f_rtw"><span>I confirm I have the right to work in the UK</span></div>'+
   '<label>Pharmacy you worked at</label><select id="f_pharmacy"><option value="">— select —</option></select>'+
   '<label>Who should validate this claim?</label><select id="f_validator"><option value="">— select pharmacy first —</option></select>'+
   '<div class="warn">⚠️ Your payment cannot be processed unless the correct validator is selected. If unsure, ask the pharmacy.</div>'+
   '<label>Agreed rate (£ per hour)</label><input type="number" id="f_rate" step="0.01" min="1" inputmode="decimal">'+
-  '<p class="hint" id="ratehint"></p>'+
+  '<p class="hint">Enter the rate you agreed with the pharmacy — the validator checks it.</p>'+
   '<div id="months"></div>'+
   '<button type="button" class="btn2" id="addmonth">+ Add another month</button>'+
   '<div class="total" id="total"></div>'+
@@ -164,10 +163,6 @@ function renderForm(){
     var r=this.value;
     $('gphc_wrap').style.display=(r==='Pharmacist')?'block':'none';
     $('other_wrap').style.display=(r==='Other')?'block':'none';
-    var def=META.rates[r];
-    if(def){$('f_rate').value=def;$('ratehint').textContent='National basic rate for '+r+' is £'+def+'/hr — change it if you agreed a different rate (the validator checks it).';}
-    else{$('f_rate').value='';$('ratehint').textContent=(r==='Other')?'No default rate for Other — enter the agreed rate.':'';}
-    recalc();
   };
   $('f_rate').oninput=recalc;
   $('addmonth').onclick=addMonthBlock;
@@ -182,10 +177,18 @@ function addMonthBlock(){
   var opts=META.months.map(function(m){return '<option data-max="'+m.maxDay+'">'+esc(m.label)+'</option>'}).join('');
   div.innerHTML='<label style="margin-top:2px">Month</label><select id="mm'+i+'">'+opts+'</select>'+
     '<label>Tap every day you worked</label><div class="days" id="md'+i+'"></div>'+
+    '<div class="check" style="margin-top:14px"><input type="checkbox" id="sm'+i+'"><span><b>Same hours every day</b></span></div>'+
+    '<div id="sw'+i+'" style="display:none"><div class="hourrow"><span class="d">Hours per day</span><input type="number" id="sh'+i+'" step="0.25" min="0.25" max="24" placeholder="hours" inputmode="decimal"></div></div>'+
     '<div id="mh'+i+'"></div>'+
     (i>0?'<button type="button" class="btn2" onclick="removeBlock('+i+')">Remove this month</button>':'');
   document.getElementById('months').appendChild(div);
   document.getElementById('mm'+i).onchange=function(){buildDays(i)};
+  document.getElementById('sm'+i).onchange=function(){
+    document.getElementById('sw'+i).style.display=this.checked?'block':'none';
+    document.getElementById('mh'+i).style.display=this.checked?'none':'block';
+    recalc();
+  };
+  document.getElementById('sh'+i).oninput=recalc;
   buildDays(i);
 }
 function removeBlock(i){var el=document.getElementById('mb'+i);el.parentNode.removeChild(el);recalc();}
@@ -218,8 +221,14 @@ function collectMonths(){
   var out=[];
   document.querySelectorAll('.mblock').forEach(function(div){
     var i=div.id.slice(2);var label=document.getElementById('mm'+i).value;var entries=[];
-    div.querySelectorAll('.hourrow input').forEach(function(inp){entries.push({day:Number(inp.id.split('_')[1]),hours:Number(inp.value)});});
-    out.push({label:label,entries:entries});
+    var same=document.getElementById('sm'+i).checked;
+    if(same){
+      var hrs=Number(document.getElementById('sh'+i).value);
+      document.querySelectorAll('#md'+i+' .day.on').forEach(function(b){entries.push({day:Number(b.textContent),hours:hrs});});
+    } else {
+      div.querySelectorAll('#mh'+i+' .hourrow input').forEach(function(inp){entries.push({day:Number(inp.id.split('_')[1]),hours:Number(inp.value)});});
+    }
+    out.push({label:label,entries:entries,_same:same});
   });
   return out;
 }
@@ -242,7 +251,6 @@ function submit(){
   if(!$('f_phone').value.trim())e.push('Phone number');
   var role=$('f_role').value;if(!role)e.push('Role');
   if(role==='Pharmacist'&&!/^\d{7}$/.test($('f_gphc').value.trim()))e.push('GPhC number (7 digits) — required for pharmacists');
-  if(!$('f_indem').checked)e.push('Indemnity insurance confirmation');
   if(!$('f_rtw').checked)e.push('Right-to-work confirmation');
   if(!$('f_pharmacy').value)e.push('Pharmacy');
   if(!$('f_validator').value)e.push('Validator');
@@ -250,7 +258,13 @@ function submit(){
   var months=collectMonths();var anyDays=false;
   months.forEach(function(m){
     if(!m.entries.length)e.push('No days ticked for '+m.label);
-    m.entries.forEach(function(en){anyDays=true;if(!(en.hours>0&&en.hours<=24))e.push('Hours for the '+ordinal(en.day)+' ('+m.label+')')});
+    if(m._same){
+      if(m.entries.length)anyDays=true;
+      var hh=m.entries.length?m.entries[0].hours:0;
+      if(m.entries.length&&!(hh>0&&hh<=24))e.push('Hours per day ('+m.label+')');
+    } else {
+      m.entries.forEach(function(en){anyDays=true;if(!(en.hours>0&&en.hours<=24))e.push('Hours for the '+ordinal(en.day)+' ('+m.label+')')});
+    }
   });
   if(!anyDays&&months.length)e.push('Tick at least one day');
   var sort=$('f_sort').value.replace(/[\s-]/g,'');
@@ -312,7 +326,7 @@ function renderReview(token,c,errMsg){
     '<tr><td>Locum</td><td><b>'+esc(c.locum.name)+'</b><br>'+esc(c.locum.email)+' · '+esc(c.locum.phone)+'</td></tr>'+
     '<tr><td>Role</td><td>'+esc(c.role)+(c.roleOther?' — '+esc(c.roleOther):'')+(c.gphc?'<br>GPhC '+esc(c.gphc):'')+'</td></tr>'+
     '<tr><td>Pharmacy</td><td>'+esc(c.pharmacy)+' ('+esc(c.company)+')</td></tr>'+
-    '<tr><td>Rate</td><td>£'+money(c.rate)+'/hr'+(c.defaultRate!=null?' <span class="hint">(national default £'+money(c.defaultRate)+')</span>':' <span class="flag">(no default for this role — confirm)</span>')+'</td></tr>'+
+    '<tr><td>Rate</td><td>£'+money(c.rate)+'/hr</td></tr>'+
     '<tr><td>Total</td><td><b>£'+money(c.split.totalAmount)+'</b> · '+c.split.totalHours+' hours</td></tr>'+
     (c.notes?'<tr><td>Notes</td><td>'+esc(c.notes)+'</td></tr>':'')+
     '</table>'+
