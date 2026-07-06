@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crest Pharmacies — Cash Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#0D47A1; --navy-deep:#0A3A85; --navy-ink:#082E68;
+  --accent:#4F88E4; --accent-soft:#EAF1FC;
+  --bg:#F4F7FC; --card:#FFFFFF; --border:#DCE3EF; --border-light:#E9EEF6;
+  --green:#1E9E5A; --red:#D7382B; --amber:#B45309;
+  --shadow:0 1px 2px rgba(13,47,104,.05),0 2px 10px rgba(13,47,104,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#1b2537;font-family:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;font-size:16px;-webkit-font-smoothing:antialiased}
+.top{background:var(--navy);color:#fff;padding:14px 18px;display:flex;align-items:center;gap:12px}
+.top img{height:34px;width:34px;border-radius:8px;background:#fff;padding:3px}
+.top .t1{font-weight:800;font-size:16px;letter-spacing:.2px}
+.top .t2{font-size:12px;opacity:.85}
+.wrap{max-width:560px;margin:0 auto;padding:16px 14px 60px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:18px;margin-top:14px}
+h2{margin:2px 0 6px;font-size:20px;color:var(--navy-ink)}
+h3{margin:18px 0 6px;font-size:16px;color:var(--navy-ink)}
+p.sub{color:#59647d;margin:0 0 6px;font-size:14px}
+label{display:block;font-weight:700;margin:16px 0 6px;font-size:14.5px;color:var(--navy-ink)}
+input[type=text],input[type=email],input[type=tel],input[type=number],input[type=date],select,textarea{
+  width:100%;padding:13px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:16px;background:#fff;font-family:inherit}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);border-color:var(--accent)}
+.hint{color:#59647d;font-size:13px;margin:4px 0 0;line-height:1.45}
+.warn{background:#FFF7ED;border:1px solid #FDBA74;color:var(--amber);border-radius:10px;padding:10px 12px;font-size:13.5px;margin-top:8px}
+.err{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;border-radius:10px;padding:12px;margin:14px 0;display:none;font-size:14.5px;line-height:1.6}
+.btn{background:var(--navy);color:#fff;border:0;padding:16px;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;margin-top:22px;width:100%;font-family:inherit}
+.btn:active{background:var(--navy-deep)}
+.btn[disabled]{opacity:.55}
+.btn.green{background:var(--green)}
+.btn.red{background:var(--red)}
+.check{display:flex;gap:10px;align-items:flex-start;margin:12px 0;font-size:14.5px}
+.check input{width:20px;height:20px;margin-top:1px;flex:none}
+.kv{width:100%;margin:8px 0;font-size:15px}
+.kv td{padding:5px 0;vertical-align:top}
+.kv td:first-child{color:#59647d;padding-right:14px;white-space:nowrap}
+.banner{border-radius:12px;padding:14px;font-size:15px;margin-top:14px}
+.banner.info{background:var(--accent-soft);color:var(--navy-ink)}
+.banner.good{background:#DCFCE7;color:#14532D}
+.banner.bad{background:#FEE2E2;color:#991B1B}
+.center{text-align:center}
+.bigref{font-size:26px;font-weight:800;color:var(--navy);letter-spacing:.5px}
+.amt{font-size:28px;font-weight:800;color:var(--navy);margin:6px 0}
+.badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:700;letter-spacing:.3px}
+.badge.log{background:#DCFCE7;color:#14532D}
+.badge.pend{background:#FEF3C7;color:#92400E}
+.spin{display:inline-block;width:22px;height:22px;border:3px solid var(--accent-soft);border-top-color:var(--navy);border-radius:50%;animation:sp .8s linear infinite;vertical-align:middle}
+@keyframes sp{to{transform:rotate(360deg)}}
+.thumb{max-width:100%;border-radius:10px;border:1px solid var(--border);margin-top:8px}
+.demo{background:#082E68;color:#cfe0ff;font-size:12.5px;text-align:center;padding:7px 12px}
+.foot{margin-top:34px;color:#8a93a8;font-size:12.5px;text-align:center}
+details{margin-top:14px}
+summary{cursor:pointer;color:var(--red);font-weight:700;font-size:15px}
+</style>
+</head>
+<body>
+<div class="top">
+  <img id="logo" alt="Crest Pharmacies" src="data:image/png;base64,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">
+  <div><div class="t1">Crest Pharmacies</div><div class="t2">Cash Log</div></div>
+</div>
+<div id="demobar" class="demo" style="display:none">Demo mode — nothing is saved or sent to head office. Wire up the API to go live.</div>
+<div class="wrap">
+  <div id="app"><div class="card center"><p><span class="spin"></span></p><p class="hint">Loading…</p></div></div>
+  <div class="foot">Crest Pharmacies · Cash Log · Questions: head office</div>
+</div>
+
+<script>
+// ===========================================================================
+// Crest Pharmacies — Cash Log
+// Records money leaving the till for ANY purpose (locum cash, team lunch,
+// petty supplies, travel, refunds…). One line = one answer to "where did the
+// cash go?". Threshold rule: spends below the threshold are logged
+// automatically; at or above it, head office must acknowledge.
+//
+// BACKEND CONTRACT (mirror the locum app's Apps Script, new tab "Cash Log"):
+//   GET  ?action=cashmeta                  -> {ok, pharmacies:[], categories:[], ackThreshold:20}
+//   POST {action:'cashlog', payload}       -> {ok, ref, status:'RECORDED'|'PENDING', threshold}
+//   GET  ?action=cashentry&token=..        -> {ok, entry} | {ok:false, code:'processed'|'expired'|'invalid', ...}
+//   POST {action:'ack',   token}           -> {ok, ref, status:'ACKNOWLEDGED'}
+//   POST {action:'query', token, reason}   -> {ok, ref, status:'QUERIED'}
+// The token link goes to head office ONLY for entries at/above the threshold.
+// ===========================================================================
+var API_URL = '__API_URL__';
+var DEMO = API_URL.indexOf('__') === 0;
+
+var $app = document.getElementById('app');
+function h(html){ $app.innerHTML = html; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function money(n){ return Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,','); }
+function todayISO(){ var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+
+// --- API (plain fetch in live mode; in-memory/localStorage in demo mode) ----
+function apiGet(params){
+  if(DEMO) return demo('GET', params);
+  var q = Object.keys(params).map(function(k){return k+'='+encodeURIComponent(params[k])}).join('&');
+  return fetch(API_URL+'?'+q).then(function(r){return r.text()}).then(JSON.parse);
+}
+function apiPost(body){
+  if(DEMO) return demo('POST', body);
+  return fetch(API_URL,{method:'POST',body:JSON.stringify(body)}).then(function(r){return r.text()}).then(JSON.parse);
+}
+function fatal(msg){
+  h('<div class="card"><div class="banner bad">'+esc(msg)+'</div>'+
+    '<button class="btn" onclick="location.reload()">Try again</button></div>');
+}
+
+var CATEGORIES = [
+  'Locum / casual staff (cash)',
+  'Staff welfare / team lunch',
+  'Petty supplies',
+  'Emergency stock',
+  'Travel / parking / courier',
+  'Customer cash refund',
+  'Repairs / maintenance',
+  'Postage',
+  'Other'
+];
+function isLocumCat(c){ return /^Locum/.test(c||''); }
+
+var META=null;
+
+// --- router ---
+var TOKEN = new URLSearchParams(location.search).get('token');
+if(DEMO) document.getElementById('demobar').style.display='block';
+if (!DEMO && API_URL.indexOf('__')===0){ fatal('Setup not finished: the API URL has not been configured yet.'); }
+else if (TOKEN){ ackPage(TOKEN); } else { formPage(); }
+
+// ===========================================================================
+// MANAGER — LOG A CASH PAYMENT
+// ===========================================================================
+function formPage(){
+  apiGet({action:'cashmeta'}).then(function(meta){
+    if(!meta.ok) return fatal('Could not load the form. Please try again in a minute.');
+    META=meta; if(!META.ackThreshold) META.ackThreshold=20;
+    renderForm();
+  }).catch(function(){ fatal('No connection — check your signal and try again.'); });
+}
+
+function renderForm(){
+  var cats=(META.categories&&META.categories.length?META.categories:CATEGORIES);
+  h(
+  '<div class="card" id="formwrap">'+
+  '<h2>Log a cash payment</h2>'+
+  '<p class="sub">Record money taken from the till for any purpose, so the drawer balances and head office can see where cash went. Do this at the counter, while you remember.</p>'+
+  '<div class="err" id="errbox"></div>'+
+  '<label>Your name (who paid it out)</label><input type="text" id="f_mgr" autocomplete="name">'+
+  '<label>Pharmacy</label><select id="f_pharmacy"><option value="">— select —</option></select>'+
+  '<label>What was it for?</label><select id="f_cat"><option value="">— select —</option>'+
+    cats.map(function(c){return '<option>'+esc(c)+'</option>'}).join('')+'</select>'+
+  // locum-only compliance block
+  '<div id="locwrap" style="display:none">'+
+    '<label>Who was paid?</label><input type="text" id="f_person" autocomplete="off">'+
+    '<label>Role</label><select id="f_role"><option value="">— select —</option><option>Pharmacist</option><option>Dispenser</option><option>Driver</option><option>Other</option></select>'+
+    '<div id="gphc_wrap" style="display:none"><label>GPhC registration number</label><input type="text" id="f_gphc" inputmode="numeric" maxlength="7"><p class="hint">7 digits.</p></div>'+
+    '<div class="check"><input type="checkbox" id="f_rtw"><span>I have seen proof of their right to work in the UK</span></div>'+
+  '</div>'+
+  '<label>Amount paid (£)</label><input type="number" id="f_amount" step="0.01" min="0.01" inputmode="decimal">'+
+  '<p class="hint" id="thresholdhint"></p>'+
+  '<label>Date</label><input type="date" id="f_date">'+
+  '<label>Reason / details</label><input type="text" id="f_reason" placeholder="e.g. Sat cover, or lunch for 5 staff">'+
+  '<div class="check"><input type="checkbox" id="f_till" checked><span>Paid from the till</span></div>'+
+  '<label>Receipt photo (optional)</label><input type="file" id="f_receipt" accept="image/*" capture="environment">'+
+  '<div id="receiptprev"></div>'+
+  '<label>Notes (optional)</label><textarea id="f_notes" rows="2"></textarea>'+
+  '<button type="button" class="btn" id="submitbtn">Save to cash log</button>'+
+  '</div>');
+
+  var $=function(id){return document.getElementById(id)};
+  META.pharmacies.forEach(function(p){var o=document.createElement('option');o.textContent=p;$('f_pharmacy').appendChild(o)});
+  $('f_date').value=todayISO();
+  $('f_cat').onchange=function(){
+    $('locwrap').style.display=isLocumCat(this.value)?'block':'none';
+  };
+  $('f_role')&&($('f_role').onchange=function(){
+    $('gphc_wrap').style.display=(this.value==='Pharmacist')?'block':'none';
+  });
+  $('f_amount').oninput=updateThreshold;
+  $('f_receipt').onchange=function(){
+    var f=this.files&&this.files[0]; var box=$('receiptprev'); box.innerHTML='';
+    if(!f) return;
+    var rd=new FileReader();
+    rd.onload=function(){ RECEIPT=rd.result; box.innerHTML='<img class="thumb" src="'+RECEIPT+'">'; };
+    rd.readAsDataURL(f);
+  };
+  $('submitbtn').onclick=submit;
+  updateThreshold();
+}
+
+var RECEIPT=null;
+function updateThreshold(){
+  var el=document.getElementById('thresholdhint'); if(!el)return;
+  var amt=Number((document.getElementById('f_amount')||{}).value)||0;
+  var t=META.ackThreshold;
+  if(!amt){ el.innerHTML='Under £'+t+' is logged automatically. £'+t+' or more needs head-office acknowledgement.'; el.style.color=''; return; }
+  if(amt>=t){ el.innerHTML='£'+money(amt)+' — this will be sent to head office to acknowledge before it is final.'; el.style.color='var(--amber)'; }
+  else { el.innerHTML='£'+money(amt)+' — under the £'+t+' threshold, logged automatically. No sign-off needed.'; el.style.color='var(--green)'; }
+}
+function showErrors(msgs){
+  var b=document.getElementById('errbox');
+  b.innerHTML='<b>Please fix:</b><br>'+msgs.map(function(m){return '• '+esc(m)}).join('<br>');
+  b.style.display='block';window.scrollTo({top:0,behavior:'smooth'});
+}
+function submit(){
+  var $=function(id){return document.getElementById(id)};
+  var e=[], cat=$('f_cat').value, amt=Number($('f_amount').value);
+  if(!$('f_mgr').value.trim())e.push('Your name');
+  if(!$('f_pharmacy').value)e.push('Pharmacy');
+  if(!cat)e.push('What it was for');
+  if(isLocumCat(cat)){
+    if(!$('f_person').value.trim())e.push('Who was paid');
+    var role=$('f_role').value; if(!role)e.push('Role');
+    if(role==='Pharmacist'&&!/^\d{7}$/.test($('f_gphc').value.trim()))e.push('GPhC number (7 digits)');
+    if(!$('f_rtw').checked)e.push('Right-to-work confirmation');
+  }
+  if(!(amt>0))e.push('Amount (£)');
+  if(!$('f_date').value)e.push('Date');
+  if(!$('f_reason').value.trim())e.push('Reason / details');
+  if(e.length){showErrors(e);return;}
+  $('errbox').style.display='none';
+  var btn=$('submitbtn');btn.disabled=true;btn.textContent='Saving…';
+  var payload={
+    manager:$('f_mgr').value.trim(), pharmacy:$('f_pharmacy').value, category:cat,
+    amount:amt, date:$('f_date').value, reason:$('f_reason').value.trim(),
+    fromTill:$('f_till').checked, receipt:RECEIPT||'', notes:$('f_notes').value.trim()
+  };
+  if(isLocumCat(cat)){
+    payload.person=$('f_person').value.trim(); payload.role=$('f_role').value;
+    payload.gphc=$('f_gphc').value.trim(); payload.rtw=true;
+  }
+  apiPost({action:'cashlog', payload:payload}).then(function(res){
+    if(!res.ok){showErrors(res.errors||[res.message||'Something went wrong — try again.']);btn.disabled=false;btn.textContent='Save to cash log';return;}
+    var pending=res.status==='PENDING';
+    h('<div class="card center"><h2>Logged</h2>'+
+      '<p>Reference</p><p class="bigref">'+esc(res.ref)+'</p>'+
+      '<p class="amt">£'+money(payload.amount)+'</p>'+
+      '<p><span class="badge '+(pending?'pend':'log')+'">'+(pending?'Awaiting head-office acknowledgement':'Recorded — no sign-off needed')+'</span></p>'+
+      '<div class="banner '+(pending?'info':'good')+'">'+
+        (pending
+          ? 'This is £'+money(payload.amount)+' — head office has been sent this entry to acknowledge. It is in the cash log now and will be marked final once acknowledged.'
+          : 'Saved to the cash log. Under the £'+META.ackThreshold+' threshold, so no acknowledgement is needed. Keep the receipt if you have one.')+
+      '</div>'+
+      '<button class="btn" onclick="location.reload()">Log another payment</button></div>');
+    window.scrollTo(0,0);
+  }).catch(function(){
+    showErrors(['No connection — this was NOT saved. Check your signal and press Save again.']);
+    btn.disabled=false;btn.textContent='Save to cash log';
+  });
+}
+
+// ===========================================================================
+// HEAD OFFICE — ACKNOWLEDGE (threshold entries only)
+// ===========================================================================
+function ackPage(token){
+  apiGet({action:'cashentry',token:token}).then(function(c){
+    if(!c.ok){
+      if(c.code==='processed') return h('<div class="card"><div class="banner info">Entry <b>'+esc(c.ref)+'</b> was already <b>'+esc(c.status)+'</b>'+(c.decidedAt?' on '+new Date(c.decidedAt).toLocaleString('en-GB'):'')+'.</div><p class="hint">No further action needed.</p></div>');
+      if(c.code==='expired') return h('<div class="card"><div class="banner bad">This link has expired.</div><p class="hint">Ask the manager to re-log it, or contact head office.</p></div>');
+      return h('<div class="card"><div class="banner bad">This link is not valid.</div></div>');
+    }
+    renderAck(token,c.entry||c);
+  }).catch(function(){ fatal('No connection — check your signal and try again.'); });
+}
+
+function renderAck(token,c,errMsg){
+  var loc = isLocumCat(c.category);
+  h('<div class="card">'+
+    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
+    '<h2>Cash entry '+esc(c.ref)+'</h2>'+
+    '<p class="sub">Acknowledging confirms this cash-out is approved and recorded against the till.</p>'+
+    '<p class="amt center">£'+money(c.amount)+'</p>'+
+    '<table class="kv">'+
+    '<tr><td>What for</td><td><b>'+esc(c.category)+'</b><br>'+esc(c.reason)+'</td></tr>'+
+    '<tr><td>Pharmacy</td><td>'+esc(c.pharmacy)+'</td></tr>'+
+    '<tr><td>Paid by</td><td>'+esc(c.manager)+'</td></tr>'+
+    '<tr><td>Date</td><td>'+esc(c.date)+'</td></tr>'+
+    '<tr><td>From till</td><td>'+(c.fromTill?'Yes':'No')+'</td></tr>'+
+    (loc?'<tr><td>Paid to</td><td>'+esc(c.person||'')+' ('+esc(c.role||'')+')'+(c.gphc?'<br>GPhC '+esc(c.gphc):'')+(c.rtw?'<br>Right to work confirmed':'')+'</td></tr>':'')+
+    (c.notes?'<tr><td>Notes</td><td>'+esc(c.notes)+'</td></tr>':'')+
+    '</table>'+
+    (c.receipt?'<h3>Receipt</h3><img class="thumb" src="'+esc(c.receipt)+'">':'<p class="hint" style="margin-top:12px">No receipt attached.</p>')+
+    '<button class="btn green" id="ackbtn">Acknowledge</button>'+
+    '<details><summary>Query this entry…</summary>'+
+    '<label>Reason (the manager sees this)</label>'+
+    '<textarea id="qreason" rows="3"></textarea>'+
+    '<button class="btn red" id="qbtn">Send query</button>'+
+    '</details>'+
+    '</div>');
+
+  document.getElementById('ackbtn').onclick=function(){ decide(token,'ack','',c); };
+  document.getElementById('qbtn').onclick=function(){
+    var reason=document.getElementById('qreason').value.trim();
+    if(!reason){renderAck(token,c,'A reason is required to query this entry.');return;}
+    decide(token,'query',reason,c);
+  };
+}
+
+function decide(token,action,reason,c){
+  var ab=document.getElementById('ackbtn'),qb=document.getElementById('qbtn');
+  if(ab)ab.disabled=true; if(qb)qb.disabled=true;
+  (action==='ack'?ab:qb).textContent='Working…';
+  apiPost({action:action,token:token,reason:reason}).then(function(res){
+    if(!res.ok){
+      if(res.code==='processed') return h('<div class="card"><div class="banner info">Entry <b>'+esc(res.ref)+'</b> was already <b>'+esc(res.status)+'</b>.</div></div>');
+      return renderAck(token,c,res.message||'Something went wrong — try again.');
+    }
+    if(res.status==='ACKNOWLEDGED'){
+      h('<div class="card center"><h2>Acknowledged</h2>'+
+        '<div class="banner good"><b>'+esc(res.ref)+'</b> acknowledged and recorded against the till. '+esc(c.manager)+' has been notified.</div>'+
+        '<p class="hint">You can close this page.</p></div>');
+    } else {
+      h('<div class="card center"><h2>Queried</h2>'+
+        '<div class="banner info"><b>'+esc(res.ref)+'</b> queried. '+esc(c.manager)+' has been sent your reason.</div>'+
+        '<p class="hint">You can close this page.</p></div>');
+    }
+    window.scrollTo(0,0);
+  }).catch(function(){ renderAck(token,c,'No connection — nothing was changed. Try again.'); });
+}
+
+// ===========================================================================
+// DEMO BACKEND (only runs when API_URL is not configured)
+// Lets you click through the whole flow with no server. Uses localStorage so
+// the head-office acknowledge link works across page loads.
+// ===========================================================================
+function demo(method, p){
+  return new Promise(function(resolve){
+    setTimeout(function(){ resolve(demoHandle(method,p)); }, 300);
+  });
+}
+function demoStore(token,obj){ try{ localStorage.setItem('cashlog_'+token, JSON.stringify(obj)); }catch(e){} }
+function demoLoad(token){ try{ return JSON.parse(localStorage.getItem('cashlog_'+token)); }catch(e){ return null; } }
+function demoHandle(method,p){
+  if(method==='GET' && p.action==='cashmeta'){
+    return {ok:true, ackThreshold:20,
+      pharmacies:['Crest — High Street','Crest — Riverside','Crest — Market Square','Crest — Station Road'],
+      categories:CATEGORIES};
+  }
+  if(method==='POST' && p.action==='cashlog'){
+    var pl=p.payload, t=META.ackThreshold||20;
+    var ref='CX-'+Math.random().toString(36).slice(2,7).toUpperCase();
+    var pending=pl.amount>=t;
+    var token='demo'+Math.random().toString(36).slice(2,9);
+    var entry={ref:ref, status:pending?'PENDING':'RECORDED'};
+    for(var k in pl) entry[k]=pl[k];
+    demoStore(token, entry);
+    if(pending){
+      console.log('%c[DEMO] Head-office acknowledge link:', 'color:#0D47A1;font-weight:bold',
+        location.pathname+'?token='+token);
+    }
+    return {ok:true, ref:ref, status:pending?'PENDING':'RECORDED', threshold:t, _demoToken:pending?token:null};
+  }
+  if(method==='GET' && p.action==='cashentry'){
+    var c=demoLoad(p.token);
+    if(!c) return {ok:false, code:'invalid'};
+    if(c.status==='ACKNOWLEDGED'||c.status==='QUERIED') return {ok:false, code:'processed', ref:c.ref, status:c.status};
+    return {ok:true, entry:c};
+  }
+  if(method==='POST' && (p.action==='ack'||p.action==='query')){
+    var c2=demoLoad(p.token);
+    if(!c2) return {ok:false, code:'invalid'};
+    if(c2.status==='ACKNOWLEDGED'||c2.status==='QUERIED') return {ok:false, code:'processed', ref:c2.ref, status:c2.status};
+    c2.status = p.action==='ack' ? 'ACKNOWLEDGED' : 'QUERIED';
+    c2.decidedAt = new Date().toISOString();
+    demoStore(p.token, c2);
+    return {ok:true, ref:c2.ref, status:c2.status};
+  }
+  return {ok:false, message:'Unknown action'};
+}
+</script>
+</body>
+</html>
