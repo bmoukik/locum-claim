@@ -53,14 +53,24 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);border-c
 .banner.bad{background:#FEE2E2;color:#991B1B}
 .center{text-align:center}
 .bigref{font-size:26px;font-weight:800;color:var(--navy);letter-spacing:.5px}
-.amt{font-size:28px;font-weight:800;color:var(--navy);margin:6px 0}
 .badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:700;letter-spacing:.3px;margin:2px}
 .badge.loan{background:#FEF3C7;color:#92400E}
 .badge.transfer{background:#DBEAFE;color:#1E40AF}
 .badge.cd{background:#FEE2E2;color:#991B1B}
 .badge.fridge{background:#E0F2FE;color:#075985}
-.badge.pend{background:#FEF3C7;color:#92400E}
 .total{font-size:18px;margin-top:16px;color:var(--navy-ink)}
+.mybranch{font-size:13.5px;color:#59647d;margin:14px 2px 0}
+.mybranch b{color:var(--navy-ink)}
+.mybranch a{color:var(--accent);font-weight:600;cursor:pointer;text-decoration:none}
+.inbox{border:1.5px solid #FDBA74;background:#FFFBEB;border-radius:14px;padding:14px 16px;margin-top:14px}
+.inbox h3{margin:0 0 4px;font-size:16px;color:#92400E}
+.inbox p.sub{margin:0 0 8px}
+.initem{background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:13px 14px;margin-top:10px;cursor:pointer;display:flex;align-items:center;gap:12px}
+.initem:active{background:var(--accent-soft)}
+.initem .info{flex:1;min-width:0}
+.initem .info b{display:block;font-size:15px;color:var(--navy-ink)}
+.initem .info span{font-size:13px;color:#59647d}
+.initem .go{color:var(--navy);font-size:22px;font-weight:800;flex:none}
 .spin{display:inline-block;width:22px;height:22px;border:3px solid var(--accent-soft);border-top-color:var(--navy);border-radius:50%;animation:sp .8s linear infinite;vertical-align:middle}
 @keyframes sp{to{transform:rotate(360deg)}}
 .demo{background:#082E68;color:#cfe0ff;font-size:12.5px;text-align:center;padding:7px 12px}
@@ -84,25 +94,25 @@ summary{cursor:pointer;color:var(--red);font-weight:700;font-size:15px}
 // ===========================================================================
 // Crest Pharmacies — Inter-branch Stock Transfer Note
 // The phone call / WhatsApp coordination stays exactly as it is. This page
-// only writes down what moved, after the fact: the SENDING branch logs the
-// transfer in ~20 seconds, the RECEIVING branch confirms with one tap.
-// Both sides agreed => the ledger line is trustworthy.
+// only writes down what moved: the SENDING branch logs it in ~20 seconds,
+// and when the box arrives the RECEIVING branch opens this same page —
+// the incoming transfer is already waiting at the top — and taps Received.
+// No links, no emails: each device remembers which branch it belongs to.
 //
-//   TRANSFER  = receiver keeps it. Settled at COST. Feeds the monthly
-//               per-branch-pair netting journal (net zero at company level).
-//   LOAN      = return in kind expected. No P&L effect while open; the
-//               backend nudges and auto-converts to a transfer if not
-//               returned in 30 days. A return is logged as a new note with
-//               "return of loan" referencing the original.
+//   TRANSFER = the other branch keeps it.
+//   LOAN     = they send the same item back; if not returned within 30
+//              days the backend records it as kept.
+// (All settlement/valuation between branches is handled by head office
+//  from this data — none of that is surfaced to branch staff.)
 //
 // BACKEND CONTRACT (same Apps Script, new tab "Transfers"):
-//   GET  ?action=transfermeta                -> {ok, branches:[], loanConvertDays:30}
-//   POST {action:'transferlog', payload}     -> {ok, ref, status:'PENDING'}
-//        (emails the receiving branch a confirm token link)
-//   GET  ?action=transferentry&token=..      -> {ok, entry} | {ok:false, code:'processed'|'expired'|'invalid'}
-//   POST {action:'receive', token}           -> {ok, ref, status:'RECEIVED'}
-//   POST {action:'dispute', token, reason}   -> {ok, ref, status:'DISPUTED'}
-//   Month-end (time trigger): one netting email per branch pair for accounts.
+//   GET  ?action=transfermeta                 -> {ok, branches:[], loanConvertDays:30}
+//   POST {action:'transferlog', payload}      -> {ok, ref, status:'PENDING'}
+//   GET  ?action=pending&branch=NAME          -> {ok, entries:[{token, ref, item, qty, from, type, cd, fridge, date}]}
+//   GET  ?action=transferentry&token=..       -> {ok, entry} | {ok:false, code:'processed'|'invalid'}
+//   POST {action:'receive', token}            -> {ok, ref, status:'RECEIVED'}
+//   POST {action:'dispute', token, reason}    -> {ok, ref, status:'DISPUTED'}
+//   Month-end reporting to head office runs server-side off the same tab.
 // ===========================================================================
 var API_URL = '__API_URL__';
 var DEMO = API_URL.indexOf('__') === 0;
@@ -128,60 +138,99 @@ function fatal(msg){
 }
 
 var META=null, TYPE='transfer';
+function myBranch(){ try{ return localStorage.getItem('crest_branch')||''; }catch(e){ return ''; } }
+function setBranch(b){ try{ localStorage.setItem('crest_branch',b); }catch(e){} }
 
-// --- router ---
-var TOKEN = new URLSearchParams(location.search).get('token');
+// --- start ---
 if(DEMO) document.getElementById('demobar').style.display='block';
-if (!DEMO && API_URL.indexOf('__')===0){ fatal('Setup not finished: the API URL has not been configured yet.'); }
-else if (TOKEN){ receivePage(TOKEN); } else { formPage(); }
+apiGet({action:'transfermeta'}).then(function(meta){
+  if(!meta.ok) return fatal('Could not load. Please try again in a minute.');
+  META=meta; if(!META.loanConvertDays) META.loanConvertDays=30;
+  if(!myBranch() || META.branches.indexOf(myBranch())<0) renderBranchPick();
+  else home();
+}).catch(function(){ fatal('No connection — check your signal and try again.'); });
 
 // ===========================================================================
-// SENDING BRANCH — LOG THE TRANSFER
+// ONE-TIME: WHICH BRANCH IS THIS DEVICE AT?
 // ===========================================================================
-function formPage(){
-  apiGet({action:'transfermeta'}).then(function(meta){
-    if(!meta.ok) return fatal('Could not load the form. Please try again in a minute.');
-    META=meta; if(!META.loanConvertDays) META.loanConvertDays=30;
-    renderForm();
-  }).catch(function(){ fatal('No connection — check your signal and try again.'); });
+function renderBranchPick(){
+  h('<div class="card">'+
+    '<h2>Which branch is this?</h2>'+
+    '<p class="sub">One-time setup for this phone — it\'ll remember.</p>'+
+    '<label>Branch</label><select id="b_pick"><option value="">— select —</option>'+
+    META.branches.map(function(b){return '<option>'+esc(b)+'</option>'}).join('')+'</select>'+
+    '<button class="btn" id="b_save">Save</button></div>');
+  document.getElementById('b_save').onclick=function(){
+    var v=document.getElementById('b_pick').value;
+    if(!v) return;
+    setBranch(v); home();
+  };
 }
 
-function renderForm(){
-  h(
+// ===========================================================================
+// HOME — incoming stock waiting (if any) + the log form
+// ===========================================================================
+function home(){
+  h('<div class="card center"><p><span class="spin"></span></p><p class="hint">Loading…</p></div>');
+  apiGet({action:'pending', branch:myBranch()}).then(function(res){
+    renderHome((res&&res.ok&&res.entries)||[]);
+  }).catch(function(){ renderHome([]); });
+}
+
+function renderHome(incoming){
+  var inboxHtml='';
+  if(incoming.length){
+    inboxHtml='<div class="inbox"><h3>📦 Incoming stock — tap when it arrives</h3>'+
+      '<p class="sub">Another branch has sent you these:</p>'+
+      incoming.map(function(x){
+        return '<div class="initem" data-token="'+esc(x.token)+'">'+
+          '<div class="info"><b>'+esc(x.item)+'</b>'+
+          '<span>'+esc(String(x.qty))+' pack(s) · from '+esc(x.from)+' · '+esc(x.date)+'</span>'+
+          '<span>'+(x.type==='loan'?'<span class="badge loan">LOAN</span>':'<span class="badge transfer">TRANSFER</span>')+
+          (x.cd?'<span class="badge cd">CD</span>':'')+(x.fridge?'<span class="badge fridge">FRIDGE</span>':'')+'</span></div>'+
+          '<div class="go">›</div></div>';
+      }).join('')+'</div>';
+  }
+  h(inboxHtml+
+  '<p class="mybranch">This device: <b>'+esc(myBranch())+'</b> · <a id="chbr">change</a></p>'+
   '<div class="card" id="formwrap">'+
-  '<h2>Log a stock transfer</h2>'+
-  '<p class="sub">Sorted an emergency for another branch? Great — write it down here while the driver is on the way, so both tills and both P&amp;Ls stay right. Takes 20 seconds.</p>'+
+  '<h2>Sending stock to another branch?</h2>'+
+  '<p class="sub">Write it down while the driver\'s on the way — takes 20 seconds, and you\'re done.</p>'+
   '<div class="err" id="errbox"></div>'+
   '<label>Your name</label><input type="text" id="f_name" autocomplete="name">'+
-  '<label>From (your branch — the sender)</label><select id="f_from"><option value="">— select —</option></select>'+
-  '<label>To (the branch receiving it)</label><select id="f_to"><option value="">— select —</option></select>'+
+  '<label>Sending to</label><select id="f_to"><option value="">— select —</option></select>'+
   '<label>Medicine / item</label><input type="text" id="f_item" placeholder="e.g. Amoxicillin 500mg caps, 21-pack">'+
   '<label>Quantity (packs)</label><input type="number" id="f_qty" step="1" min="1" inputmode="numeric">'+
   '<label>Cost price per pack (£)</label><input type="number" id="f_cost" step="0.01" min="0.01" inputmode="decimal">'+
-  '<p class="hint">What YOUR branch paid, not the retail price — transfers move at cost.</p>'+
+  '<p class="hint">The price on the invoice / your system — not the shelf price.</p>'+
   '<div class="total" id="total"></div>'+
-  '<label>Keeping it, or lending it?</label>'+
+  '<label>Are they keeping it, or borrowing it?</label>'+
   '<div class="seg">'+
-    '<div class="opt on" id="opt_transfer"><b>Transfer</b><span>they keep it — settled at cost</span></div>'+
-    '<div class="opt" id="opt_loan"><b>Loan</b><span>they return the same item</span></div>'+
+    '<div class="opt on" id="opt_transfer"><b>Keeping it</b><span>it\'s theirs now</span></div>'+
+    '<div class="opt" id="opt_loan"><b>Borrowing</b><span>they return the same item</span></div>'+
   '</div>'+
   '<p class="hint" id="typehint"></p>'+
-  '<div class="check"><input type="checkbox" id="f_return"><span>This is the <b>return of an earlier loan</b></span></div>'+
-  '<div id="retwrap" style="display:none"><label>Original loan reference</label><input type="text" id="f_retref" placeholder="e.g. TX-AB123"></div>'+
+  '<div class="check"><input type="checkbox" id="f_return"><span>This is the <b>return of something we borrowed</b></span></div>'+
+  '<div id="retwrap" style="display:none"><label>Reference of the original (if you have it)</label><input type="text" id="f_retref" placeholder="e.g. TX-AB123"></div>'+
   '<div class="check"><input type="checkbox" id="f_cd"><span>Controlled drug (Schedule 2/3)</span></div>'+
-  '<div class="warn" id="cdwarn" style="display:none"><b>Controlled drug:</b> complete the requisition (FP10CDF) and make the CD register entries at <b>both</b> branches within 24 hours, as usual. This log is extra — it does not replace either.</div>'+
+  '<div class="warn" id="cdwarn" style="display:none"><b>Controlled drug:</b> complete the requisition (FP10CDF) and make the CD register entries at <b>both</b> branches within 24 hours, as usual. This note is extra — it does not replace either.</div>'+
   '<div class="check"><input type="checkbox" id="f_fridge"><span>Fridge line (2–8°C)</span></div>'+
   '<div class="warn" id="fridgewarn" style="display:none"><b>Fridge line:</b> use a proper cold-chain transit container for the journey — not a domestic cool box.</div>'+
   '<label>Who is moving it?</label><select id="f_transport"><option value="">— select —</option><option>Our driver is delivering</option><option>Their driver is collecting</option><option>Other (staff member / courier)</option></select>'+
   '<label>Date</label><input type="date" id="f_date">'+
   '<label>Notes (optional)</label><textarea id="f_notes" rows="2" placeholder="e.g. patient waiting on Rx, agreed with Sam"></textarea>'+
-  '<button type="button" class="btn" id="submitbtn">Log transfer</button>'+
-  '<p class="hint" style="margin-top:10px">The receiving branch gets a link to tap "Received" — the ledger line is only final once they confirm.</p>'+
+  '<button type="button" class="btn" id="submitbtn">Log it</button>'+
+  '<p class="hint" style="margin-top:10px">When the box arrives, it\'ll be waiting at the top of this page at the other branch — they just tap <b>Received</b>.</p>'+
   '</div>');
 
   var $=function(id){return document.getElementById(id)};
+  document.getElementById('chbr').onclick=function(){renderBranchPick()};
+  document.querySelectorAll('.initem').forEach(function(el){
+    el.onclick=function(){ openEntry(el.getAttribute('data-token')); };
+  });
   META.branches.forEach(function(b){
-    ['f_from','f_to'].forEach(function(id){var o=document.createElement('option');o.textContent=b;$(id).appendChild(o)});
+    if(b===myBranch())return;
+    var o=document.createElement('option');o.textContent=b;$('f_to').appendChild(o);
   });
   $('f_date').value=todayISO();
   $('f_qty').oninput=recalc; $('f_cost').oninput=recalc;
@@ -198,14 +247,14 @@ function setType(t){
   document.getElementById('opt_transfer').classList.toggle('on',t==='transfer');
   document.getElementById('opt_loan').classList.toggle('on',t==='loan');
   document.getElementById('typehint').innerHTML = t==='loan'
-    ? 'Loan: no cost moves between branches while it\'s open. If it isn\'t returned within '+META.loanConvertDays+' days it automatically becomes a transfer at cost.'
-    : 'Transfer: the cost moves to the receiving branch in this month\'s netting — your branch is made whole.';
+    ? 'Borrowing: they send the same item back. If it doesn\'t come back within '+META.loanConvertDays+' days, it\'s recorded as kept.'
+    : 'Keeping it: nothing else for you to do once it\'s logged.';
 }
 function recalc(){
   var q=Number((document.getElementById('f_qty')||{}).value)||0;
   var c=Number((document.getElementById('f_cost')||{}).value)||0;
   var el=document.getElementById('total');if(!el)return;
-  el.innerHTML=(q>0&&c>0)?('<b>Value at cost: '+q+' × £'+money(c)+' = £'+money(q*c)+'</b>'):'';
+  el.innerHTML=(q>0&&c>0)?('<b>Value: '+q+' × £'+money(c)+' = £'+money(q*c)+'</b>'):'';
 }
 function showErrors(msgs){
   var b=document.getElementById('errbox');
@@ -216,51 +265,47 @@ function submit(){
   var $=function(id){return document.getElementById(id)};
   var e=[];
   if(!$('f_name').value.trim())e.push('Your name');
-  if(!$('f_from').value)e.push('From branch');
-  if(!$('f_to').value)e.push('To branch');
-  if($('f_from').value&&$('f_from').value===$('f_to').value)e.push('From and To must be different branches');
+  if(!$('f_to').value)e.push('Sending to');
   if(!$('f_item').value.trim())e.push('Medicine / item');
   var qty=Number($('f_qty').value);if(!(qty>0))e.push('Quantity');
   var cost=Number($('f_cost').value);if(!(cost>0))e.push('Cost price per pack (£)');
-  if($('f_return').checked&&!$('f_retref').value.trim())e.push('Original loan reference');
   if(!$('f_transport').value)e.push('Who is moving it');
   if(!$('f_date').value)e.push('Date');
   if(e.length){showErrors(e);return;}
   $('errbox').style.display='none';
   var btn=$('submitbtn');btn.disabled=true;btn.textContent='Logging…';
   var payload={
-    sender:$('f_name').value.trim(), from:$('f_from').value, to:$('f_to').value,
+    sender:$('f_name').value.trim(), from:myBranch(), to:$('f_to').value,
     item:$('f_item').value.trim(), qty:qty, unitCost:cost, total:Math.round(qty*cost*100)/100,
-    type:TYPE, returnOfLoan:$('f_return').checked?$('f_retref').value.trim():'',
+    type:TYPE, returnOfLoan:$('f_return').checked?$('f_retref').value.trim()||'yes':'',
     cd:$('f_cd').checked, fridge:$('f_fridge').checked,
     transport:$('f_transport').value, date:$('f_date').value, notes:$('f_notes').value.trim()
   };
   apiPost({action:'transferlog', payload:payload}).then(function(res){
-    if(!res.ok){showErrors(res.errors||[res.message||'Something went wrong — try again.']);btn.disabled=false;btn.textContent='Log transfer';return;}
-    h('<div class="card center"><h2>Transfer logged</h2>'+
+    if(!res.ok){showErrors(res.errors||[res.message||'Something went wrong — try again.']);btn.disabled=false;btn.textContent='Log it';return;}
+    h('<div class="card center"><h2>Logged — all done</h2>'+
       '<p>Reference</p><p class="bigref">'+esc(res.ref)+'</p>'+
-      '<p class="amt">£'+money(payload.total)+' <span style="font-size:14px;color:#59647d;font-weight:600">at cost</span></p>'+
-      '<p><span class="badge '+(payload.type==='loan'?'loan':'transfer')+'">'+(payload.type==='loan'?'LOAN — return expected':'TRANSFER — they keep it')+'</span>'+
+      '<p><span class="badge '+(payload.type==='loan'?'loan':'transfer')+'">'+(payload.type==='loan'?'BORROWING — they return it':'KEEPING IT')+'</span>'+
       (payload.cd?'<span class="badge cd">CD</span>':'')+(payload.fridge?'<span class="badge fridge">FRIDGE</span>':'')+'</p>'+
-      '<div class="banner info"><b>'+esc(payload.to)+'</b> has been sent a link to confirm they received it. The ledger line is final once they tap Received.'+
+      '<div class="banner info">When the box arrives at <b>'+esc(payload.to)+'</b>, it\'ll be waiting on their Stock Transfer page — they just tap <b>Received</b>.'+
       (payload.cd?'<br><br><b>Don\'t forget:</b> FP10CDF requisition + CD register entries at both branches.':'')+'</div>'+
-      '<button class="btn" onclick="location.reload()">Log another transfer</button></div>');
+      '<button class="btn" onclick="location.reload()">Done</button></div>');
     window.scrollTo(0,0);
   }).catch(function(){
     showErrors(['No connection — this was NOT logged. Check your signal and press Log again.']);
-    btn.disabled=false;btn.textContent='Log transfer';
+    btn.disabled=false;btn.textContent='Log it';
   });
 }
 
 // ===========================================================================
-// RECEIVING BRANCH — CONFIRM RECEIPT
+// RECEIVING — tap the incoming item, check it, tap Received
 // ===========================================================================
-function receivePage(token){
+function openEntry(token){
+  h('<div class="card center"><p><span class="spin"></span></p><p class="hint">Loading…</p></div>');
   apiGet({action:'transferentry',token:token}).then(function(c){
     if(!c.ok){
-      if(c.code==='processed') return h('<div class="card"><div class="banner info">Transfer <b>'+esc(c.ref)+'</b> was already <b>'+esc(c.status)+'</b>'+(c.decidedAt?' on '+new Date(c.decidedAt).toLocaleString('en-GB'):'')+'.</div><p class="hint">No further action needed.</p></div>');
-      if(c.code==='expired') return h('<div class="card"><div class="banner bad">This link has expired.</div><p class="hint">Ask the sending branch to re-log it, or contact head office.</p></div>');
-      return h('<div class="card"><div class="banner bad">This link is not valid.</div></div>');
+      if(c.code==='processed') return h('<div class="card"><div class="banner info">Transfer <b>'+esc(c.ref)+'</b> was already <b>'+esc(c.status)+'</b>.</div><button class="btn" onclick="location.reload()">Back</button></div>');
+      return h('<div class="card"><div class="banner bad">This transfer could not be found.</div><button class="btn" onclick="location.reload()">Back</button></div>');
     }
     renderReceive(token,c.entry||c);
   }).catch(function(){ fatal('No connection — check your signal and try again.'); });
@@ -270,23 +315,21 @@ function renderReceive(token,c,errMsg){
   h('<div class="card">'+
     (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
     '<h2>Incoming stock '+esc(c.ref)+'</h2>'+
-    '<p class="sub">Check the box that arrived against this note, then confirm. Only confirmed transfers go in the books.</p>'+
-    '<p class="center"><span class="badge '+(c.type==='loan'?'loan':'transfer')+'">'+(c.type==='loan'?'LOAN — you return the same item':'TRANSFER — you keep it')+'</span>'+
+    '<p class="sub">Check the box against this note, then tap Received.</p>'+
+    '<p class="center"><span class="badge '+(c.type==='loan'?'loan':'transfer')+'">'+(c.type==='loan'?'BORROWING — you return the same item':'YOURS TO KEEP')+'</span>'+
     (c.cd?'<span class="badge cd">CONTROLLED DRUG</span>':'')+(c.fridge?'<span class="badge fridge">FRIDGE LINE</span>':'')+'</p>'+
     '<table class="kv">'+
     '<tr><td>Item</td><td><b>'+esc(c.item)+'</b></td></tr>'+
     '<tr><td>Quantity</td><td>'+esc(String(c.qty))+' pack(s)</td></tr>'+
-    '<tr><td>Value at cost</td><td><b>£'+money(c.total)+'</b> ('+esc(String(c.qty))+' × £'+money(c.unitCost)+')</td></tr>'+
     '<tr><td>From</td><td>'+esc(c.from)+' — logged by '+esc(c.sender)+'</td></tr>'+
-    '<tr><td>To</td><td>'+esc(c.to)+'</td></tr>'+
     '<tr><td>Transport</td><td>'+esc(c.transport)+'</td></tr>'+
     '<tr><td>Date</td><td>'+esc(c.date)+'</td></tr>'+
-    (c.returnOfLoan?'<tr><td>Returns loan</td><td>'+esc(c.returnOfLoan)+'</td></tr>':'')+
+    (c.returnOfLoan?'<tr><td>Returns</td><td>a previous borrow ('+esc(c.returnOfLoan)+')</td></tr>':'')+
     (c.notes?'<tr><td>Notes</td><td>'+esc(c.notes)+'</td></tr>':'')+
     '</table>'+
-    (c.cd?'<div class="warn"><b>Controlled drug:</b> make your CD register receipt entry within 24 hours. This confirmation does not replace it.</div>':'')+
+    (c.cd?'<div class="warn"><b>Controlled drug:</b> make your CD register receipt entry within 24 hours. This tap does not replace it.</div>':'')+
     (c.fridge?'<div class="warn"><b>Fridge line:</b> check it travelled cold and refrigerate immediately.</div>':'')+
-    '<button class="btn green" id="recvbtn">Received — all correct</button>'+
+    '<button class="btn green" id="recvbtn">Received ✓</button>'+
     '<details><summary>Something\'s wrong…</summary>'+
     '<label>What\'s wrong? (the sending branch sees this)</label>'+
     '<textarea id="dreason" rows="3" placeholder="e.g. only 8 packs arrived, note says 10"></textarea>'+
@@ -308,18 +351,18 @@ function decide(token,action,reason,c){
   (action==='receive'?rb:db).textContent='Working…';
   apiPost({action:action,token:token,reason:reason}).then(function(res){
     if(!res.ok){
-      if(res.code==='processed') return h('<div class="card"><div class="banner info">Transfer <b>'+esc(res.ref)+'</b> was already <b>'+esc(res.status)+'</b>.</div></div>');
+      if(res.code==='processed') return h('<div class="card"><div class="banner info">Transfer <b>'+esc(res.ref)+'</b> was already <b>'+esc(res.status)+'</b>.</div><button class="btn" onclick="location.reload()">Back</button></div>');
       return renderReceive(token,c,res.message||'Something went wrong — try again.');
     }
     if(res.status==='RECEIVED'){
-      h('<div class="card center"><h2>Confirmed</h2>'+
-        '<div class="banner good"><b>'+esc(res.ref)+'</b> is in the books: '+esc(c.item)+', £'+money(c.total)+' at cost, '+esc(c.from)+' → '+esc(c.to)+'.'+
-        (c.type==='loan'?' It\'s recorded as a loan — remember to send the same item back.':' It\'ll appear in this month\'s netting for accounts.')+'</div>'+
-        '<p class="hint">You can close this page.</p></div>');
+      h('<div class="card center"><h2>Received ✓</h2>'+
+        '<div class="banner good"><b>'+esc(res.ref)+'</b> — '+esc(c.item)+' from '+esc(c.from)+'. All done.'+
+        (c.type==='loan'?' It\'s a borrow — remember to send the same item back.':'')+'</div>'+
+        '<button class="btn" onclick="location.reload()">Back</button></div>');
     } else {
       h('<div class="card center"><h2>Problem reported</h2>'+
-        '<div class="banner info"><b>'+esc(res.ref)+'</b> is on hold — '+esc(c.from)+' has been sent your note and will sort it out. Nothing goes in the books until it\'s resolved.</div>'+
-        '<p class="hint">You can close this page.</p></div>');
+        '<div class="banner info"><b>'+esc(res.ref)+'</b> is on hold — '+esc(c.from)+' has been sent your note and will sort it out.</div>'+
+        '<button class="btn" onclick="location.reload()">Back</button></div>');
     }
     window.scrollTo(0,0);
   }).catch(function(){ renderReceive(token,c,'No connection — nothing was changed. Try again.'); });
@@ -327,7 +370,8 @@ function decide(token,action,reason,c){
 
 // ===========================================================================
 // DEMO BACKEND (only when API_URL is not configured) — click through the
-// whole flow with no server; the confirm link works via localStorage.
+// whole flow with no server; entries persist in localStorage so you can
+// switch the device branch and see the incoming item appear.
 // ===========================================================================
 function demo(method, p){
   return new Promise(function(resolve){
@@ -336,10 +380,27 @@ function demo(method, p){
 }
 function demoStore(token,obj){ try{ localStorage.setItem('transfer_'+token, JSON.stringify(obj)); }catch(e){} }
 function demoLoad(token){ try{ return JSON.parse(localStorage.getItem('transfer_'+token)); }catch(e){ return null; } }
+function demoAll(){
+  var out=[];
+  try{
+    for(var i=0;i<localStorage.length;i++){
+      var k=localStorage.key(i);
+      if(k&&k.indexOf('transfer_')===0){
+        var v=demoLoad(k.slice(9)); if(v){v._token=k.slice(9);out.push(v);}
+      }
+    }
+  }catch(e){}
+  return out;
+}
 function demoHandle(method,p){
   if(method==='GET' && p.action==='transfermeta'){
     return {ok:true, loanConvertDays:30,
       branches:['Crest — High Street','Crest — Riverside','Crest — Market Square','Crest — Station Road']};
+  }
+  if(method==='GET' && p.action==='pending'){
+    var entries=demoAll().filter(function(x){return x.status==='PENDING'&&x.to===p.branch;})
+      .map(function(x){return {token:x._token, ref:x.ref, item:x.item, qty:x.qty, from:x.from, type:x.type, cd:x.cd, fridge:x.fridge, date:x.date};});
+    return {ok:true, entries:entries};
   }
   if(method==='POST' && p.action==='transferlog'){
     var pl=p.payload;
@@ -348,9 +409,7 @@ function demoHandle(method,p){
     var entry={ref:ref, status:'PENDING'};
     for(var k in pl) entry[k]=pl[k];
     demoStore(token, entry);
-    console.log('%c[DEMO] Receiving-branch confirm link:', 'color:#0D47A1;font-weight:bold',
-      location.pathname+'?token='+token);
-    return {ok:true, ref:ref, status:'PENDING', _demoToken:token};
+    return {ok:true, ref:ref, status:'PENDING'};
   }
   if(method==='GET' && p.action==='transferentry'){
     var c=demoLoad(p.token);
