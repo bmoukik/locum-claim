@@ -5,7 +5,8 @@ description: Context, conventions, and current status for Crest Pharmacies' sing
 
 # Crest Pharmacies web apps — project context
 
-Last updated: 13 Jul 2026.
+Last updated: 16 Jul 2026. **See "SESSION HANDOFF — 16 Jul 2026" at the
+bottom for the current live plan, decisions, and the exact next actions.**
 
 Crest Pharmacies is a small UK community pharmacy chain: multiple branches in
 the same town(s), all **one company / one legal entity**. This repo holds a
@@ -18,9 +19,10 @@ head office / accounts is a separate department.
 
 | File | Purpose | Status |
 |---|---|---|
-| `index.html` | **Locum payment claim** — locum submits hours/rate/bank details → chosen validator approves via token link → accounts pays by transfer | Live (deployed via "deploy web/index.html" commits) |
-| `cash-log.html` | **Till outflow log** — manager records any cash leaving the till (locum cash, team lunch, petty supplies, travel, refunds…) | Frontend complete, demo mode; backend not wired |
-| `stock-transfer.html` | **Inter-branch emergency stock transfer note** — sender logs what moved, receiving branch taps Received | Frontend complete, demo mode; backend not wired |
+| `index.html` | **Locum payment claim** — locum submits hours/rate/bank details → chosen validator approves via token link → accounts pays by transfer | Live; phase-1 changes pending (see handoff) — **going live together with cash log + admin** |
+| `cash-log.html` | **Till outflow log** — manager records any cash leaving the till (locum cash, team lunch, petty supplies, travel, refunds…) | Frontend complete, demo mode; **going live with locum + admin** |
+| `admin.html` | **Admin / control panel** — PIN-gated settings for the whole tool family (pharmacies, validators, emails, per-tool knobs) | **PLANNED, phase 1 — not built yet** |
+| `stock-transfer.html` | **Inter-branch emergency stock transfer note** — sender logs what moved, receiving branch taps Received | Frontend complete, demo mode; **ON HOLD** (not in this go-live) |
 
 Screenshots of all flows live in `crest/screenshots/` (generated with
 Playwright + the pre-installed Chromium; viewport 460×900, deviceScaleFactor 2,
@@ -85,20 +87,123 @@ fullPage). Demo tokens print to the browser console where applicable.
 - Records retained 2 years. GPhC audit trail: who, what, when, both ends
   confirmed.
 
-## Open work (next steps)
-
-1. Owner to review cash-log and stock-transfer prototypes.
-2. Wire Apps Script backends: "Cash Log" tab (`cashmeta`, `cashlog`,
-   `cashentry`, `ack`, `query`) and "Transfers" tab (`transfermeta`,
-   `transferlog`, `pending`, `transferentry`, `receive`, `dispute`) +
-   month-end netting trigger. Then set API_URL and deploy.
-3. Later phase: head-office bulk distribution; possible boss-pitch doc for
-   the stock exchange (research findings saved in session scratchpad
-   `research.json`, key facts summarised above).
-
 ## Related trackers
 
-- Notion "Crest" hub → "Crest — To-dos" database (kept current; entries
-  exist for the backend wiring and for Carl's P&L inter-branch section).
+- Notion "Crest" hub → "Crest — To-dos" database (kept current). Relevant
+  entries: "Locum app: run backend setup + deploy" (the concrete deploy step,
+  has the backend Code.gs), "Prep boss call Tuesday" (locum = steer #1; call
+  was 14 Jul), "Locum accounting — await boss context" (Low, Boss-owned),
+  "Wire Apps Script backends for cash-log + stock-transfer", and "Carl's P&L
+  template" (inter-branch section updated with transfer-log status).
 - A separate `crest:log` skill (decisions log) exists in another
   environment/repo — not present here; don't confuse it with this file.
+- Stock-exchange research (verified July 2026) saved in the cloud session
+  scratchpad as `research.json`; key facts are summarised in the compliance
+  section above.
+
+---
+
+# SESSION HANDOFF — 16 Jul 2026 (start here)
+
+This is the live plan carried over from a long cloud-chat design session.
+Work continues on branch `claude/locum-payments-context-brflyu`. Nothing
+below is built yet unless the file status table says so.
+
+## Go-live scope (decided)
+
+**Ship together: Locum app + Cash log + Admin page.** Plan thin, develop
+subsequently. **Stock transfer is ON HOLD.** The **bulk-order / demand-
+forecasting toolkit** (flagged in Notion as possibly superseding the stock-
+transfer app; needs Proscript data + a pilot site) must be **discussed with
+the boss first** — do not build.
+
+## Approval-model decision (important — do not revert)
+
+The owner explicitly **rejected "silence is consent"** for the locum flow.
+Money moving requires a **positive, logged action** — "one-tap
+accountability." So:
+- **Validator keeps an explicit Approve tap**, and the approval **records who
+  + when** (non-repudiation), not a shared-inbox nod.
+- A slow/absent validator is handled by **reminders + escalation**, NOT by
+  auto-approving. (Their real-world process today is email approval-by-
+  exception; we are deliberately strengthening it, because it moves money.)
+- **Accounts is the explicit payer** and a second exception-handler.
+
+## Phase-1 build (thin) — what to actually build
+
+**1. Locum app (`index.html`) changes:**
+   - Keep explicit validator approval; capture approver identity (who + when).
+   - New **accounts step**: **Paid ✓** (emails the locum — kills "where's my
+     money?" chasers) OR **raise-back with reason** (bounces to validator or
+     locum). This is the known gap: accounts currently has no lever, only the
+     validator does.
+   - Two new **flags** (extend the existing server-side flags mechanism the
+     validator already sees): **duplicate/overlapping days** and **bank-
+     details-changed-since-last-claim**. (Rate-out-of-band was considered and
+     **dropped** by the owner.)
+   - **Self-approval block**: locum can't be their own validator (validator
+     email ≠ locum email).
+   - Reads validators / pharmacies / emails from the shared config.
+   - Reminder cadence DEFAULT (unconfirmed): nudge validator at 2 working
+     days, escalate to head office at 4.
+
+**2. Cash log (`cash-log.html`):** point it at the shared config (pharmacies,
+   categories, £20 threshold, ack email). Identity via device-remembers-branch
+   + submitter name; acknowledge locked to head office. Otherwise built.
+
+**3. Admin page (`admin.html`) — thin:** PIN-gated. Manage pharmacies; manage
+   validators (pharmacy / name / email / active); edit global emails
+   (accounts, locum-handling, cash-log ack); two labelled per-tool sections
+   (Locum reminder/escalate days; Cash threshold). Guardrails: email
+   validation, **cannot leave a pharmacy with zero active validators**,
+   confirm-before-save, and a **change-log row (who/when/what)**. Writes to the
+   config store. Demo mode like the others.
+
+## Shared config + control-plane architecture (decided)
+
+- **One shared Config store = single source of truth**, in its **own tabs,
+  separate from claim/cash transactional data** (ideally a separate
+  spreadsheet). Organized **Global** (pharmacies, validators+emails, accounts
+  email, locum-handling email, admin PIN) **+ per-tool sections** (namespaced;
+  e.g. Locum timings, Cash threshold).
+- **Control plane / data plane split:** a **dedicated admin/ops Google
+  account** owns the admin page + config. Other tools can live on **whatever
+  email suits their use case** (the numbers dashboard is on `accounts@`; a
+  pharmacy-specific tool could sit on that pharmacy's email) and still **read
+  config centrally** — centralisation is *logical, not physical*.
+- **Two cross-account connection patterns:** (a) a **config API endpoint** —
+  admin Apps Script web app serves config over HTTPS, any tool fetches by URL,
+  account boundaries irrelevant (keep the PIN and anything sensitive OUT of the
+  public blob); or (b) a **shared config Sheet** read-only to each tool's
+  account via `openById` (more private, needs a one-time share). Recommend the
+  endpoint with the shared-Sheet as fallback.
+- **Only the admin panel writes** config; every tool is **read-only** and
+  **fails safe** (caches last-good config, falls back to sensible defaults) so
+  the single source of truth is never a single point of failure.
+
+## Build vs backend boundary
+
+In-repo (Claude builds): `admin.html`, the `index.html` changes, cash-log
+config alignment, all with demo modes — PLUS a precise **Config-sheet layout +
+Apps Script action spec** (including the reminder/escalation cron) handed
+drop-in-ready. The Apps Script backend (reads/writes the config sheet, sends
+emails, runs reminders) is the **deploy step**, done outside this repo (see the
+Notion "run backend setup + deploy" todo, which holds the backend Code.gs).
+
+## Open inputs still needed before/at build
+
+1. **Admin PIN** — a real one, or a placeholder baked into config to change on
+   first login.
+2. **Accounts** — one shared `accounts@` inbox, or named people (like the
+   validators)?
+3. Confirm the **reminder cadence** (2 working days / escalate at 4 default).
+
+## Parked / later (do not build now)
+
+Stock transfer (on hold); bulk-order/demand-forecasting toolkit (boss first);
+line-level claim adjustment; audit/reporting dashboard; and the boss-decision
+compliance items — **IR35 / employment status** (payroll vs self-employed for
+cash/locum payments), whether the claim replaces an invoice for the tax trail,
+and **GPhC register / right-to-work verification** (currently format-checked /
+self-certified only). The IR35/invoice question was flagged for the boss-call
+steer list.
