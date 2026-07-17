@@ -239,7 +239,12 @@ function doAuth(){
       return pinPage('That PIN is not right.');
     }
     SESSION=res.session; WHO=who; DEFAULT_PIN=!!res.defaultPin;
-    CONFIG=normalise(res.config); ORIG=clone(CONFIG);
+    // if the session timed out mid-edit, keep the unsaved edits and just
+    // re-baseline the diff against the fresh server state
+    var hadEdits = false;
+    try{ hadEdits = !!(CONFIG && ORIG && diff().length); }catch(e2){}
+    ORIG = normalise(res.config);
+    if(!hadEdits) CONFIG = clone(ORIG);
     renderMain();
   }).catch(function(){ pinPage('No connection — check your signal and try again.'); });
 }
@@ -387,7 +392,13 @@ function renderMain(errs){
 function bindMain(){
   // structural edits re-render; field edits just update state
   document.querySelectorAll('[data-rmph]').forEach(function(b){
-    b.onclick=function(){ pull(); CONFIG.pharmacies.splice(Number(b.dataset.rmph),1); renderMain(); };
+    b.onclick=function(){
+      pull();
+      var gone=CONFIG.pharmacies.splice(Number(b.dataset.rmph),1)[0];
+      // take its validators with it — orphans would block the save
+      if(gone) CONFIG.validators=CONFIG.validators.filter(function(v){return v.pharmacy!==gone.name;});
+      renderMain();
+    };
   });
   document.querySelectorAll('[data-phact]').forEach(function(c){
     c.onchange=function(){ pull(); CONFIG.pharmacies[Number(c.dataset.phact)].active=c.checked; renderMain(); };

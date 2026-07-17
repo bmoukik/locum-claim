@@ -585,7 +585,7 @@ function adminAuth_(p) {
   }
   PROPS.setProperty('AUTH_FAILS', JSON.stringify({ fails: [], lockedUntil: 0 }));
   var session = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
-  PROPS.setProperty('SESSION_' + session, JSON.stringify({ by: p.by, exp: now + 1800000 }));
+  PROPS.setProperty('SESSION_' + session, JSON.stringify({ by: p.by, exp: now + 7200000 }));
   var cfg = { pharmacies: c.pharmacies, validators: c.validators, emails: c.emails, locum: c.locum, cash: c.cash }; // never the pin
   return { ok: true, session: session, config: cfg, defaultPin: hashPin_('0000', c._pin.salt) === c._pin.hash };
 }
@@ -595,7 +595,58 @@ function checkSession_(s) {
   if (!raw) return null;
   var o = JSON.parse(raw);
   if (o.exp < Date.now()) { PROPS.deleteProperty('SESSION_' + s); return null; }
+  // sliding expiry: an active session never dies mid-edit
+  o.exp = Date.now() + 7200000;
+  PROPS.setProperty('SESSION_' + s, JSON.stringify(o));
   return o;
+}
+
+// ---------------------------------------------------------------------------
+// One-off: seed the REAL Crest estate (24 trading branches; Adastral excluded,
+// merged into Canford) with one test validator each. Run from the editor as
+// the owner. Overwrites the Pharmacies + Validators tabs.
+// ---------------------------------------------------------------------------
+function seedEstate() {
+  var ESTATE = [
+    ['Meriden', 'James Whitfield', 'james'],
+    ['Linden', 'Sarah Bennett', 'sarah'],
+    ['Keresley', 'Aisha Khan', 'aisha'],
+    ['Holbrooks', 'Tom Ellis', 'tom'],
+    ['Clay', 'Priya Shah', 'priya'],
+    ['Franche', 'Daniel Okoro', 'daniel'],
+    ['Ridgacre', 'Emma Clarke', 'emma'],
+    ['Albert', 'Hassan Ali', 'hassan'],
+    ['Faraday', 'Lucy Grant', 'lucy'],
+    ['Hillfields', 'Mark Osei', 'mark'],
+    ['Dosthill', 'Nina Patel', 'nina'],
+    ['Fazeley', 'Oliver Reed', 'oliver'],
+    ['Humber', 'Fatima Noor', 'fatima'],
+    ['Aldergate', 'George Hall', 'george'],
+    ['Canford', 'Zara Ahmed', 'zara'],
+    ['Hamworthy', 'Peter Lowe', 'peter'],
+    ['Grendon', 'Megan Price', 'megan'],
+    ['Farndon', 'Ravi Kumar', 'ravi'],
+    ['Hagley', 'Chloe Turner', 'chloe'],
+    ['Walmley', 'Sam Okafor', 'sam'],
+    ['Hawthorne', 'Ben Carter', 'ben'],
+    ['Davies', 'Rhian Evans', 'rhian'],
+    ['Kilgetty', 'Gareth Jones', 'gareth'],
+    ['Crook', 'Bethan Hughes', 'bethan']
+  ];
+  var ss = SpreadsheetApp.openById(PROPS.getProperty('CONFIG_SS_ID'));
+  var ph = ss.getSheetByName('Pharmacies');
+  ph.clearContents();
+  ph.getRange(1, 1, ESTATE.length + 1, 2).setValues(
+    [['name', 'active']].concat(ESTATE.map(function (r) { return [r[0], true]; })));
+  var vs = ss.getSheetByName('Validators');
+  vs.clearContents();
+  vs.getRange(1, 1, ESTATE.length + 1, 4).setValues(
+    [['pharmacy', 'name', 'email', 'active']].concat(ESTATE.map(function (r) {
+      return [r[0], r[1], 'moukik.cyber+val.' + r[2] + '@gmail.com', true];
+    })));
+  logChange_('Estate seeded: ' + ESTATE.length + ' pharmacies, one validator each', 'seedEstate()');
+  PROPS.deleteProperty('CONFIG_CACHE');
+  Logger.log('Seeded ' + ESTATE.length + ' pharmacies + validators.');
 }
 
 function adminSave_(p) {
