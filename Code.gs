@@ -31,12 +31,13 @@ function setup() {
   var cfg = SpreadsheetApp.create('Crest Config');
   var g = cfg.getActiveSheet(); g.setName('Global');
   var salt = Utilities.getUuid();
-  g.getRange(1, 1, 5, 2).setValues([
+  g.getRange(1, 1, 6, 2).setValues([
     ['adminPinHash', hashPin_('0000', salt)],
     ['adminPinSalt', salt],
     ['email.accounts', 'moukik.cyber+accounts@gmail.com'],
     ['email.locumHandling', 'moukik.cyber+locumdesk@gmail.com'],
-    ['email.cashAck', 'moukik.cyber+cashack@gmail.com']
+    ['email.cashAck', 'moukik.cyber+cashack@gmail.com'],
+    ['admin.allowedEmails', 'bmoukik@gmail.com, moukik.cyber@gmail.com']
   ]);
   var ph = cfg.insertSheet('Pharmacies');
   ph.getRange(1, 1, 5, 2).setValues([
@@ -97,8 +98,75 @@ function doGet(e) {
     if (a === 'cashmeta') return out_(cashMeta_());
     if (a === 'cashentry') return out_(cashGet_(e.parameter.token));
     if (a === 'config') return out_(publicConfig_());
-    return out_({ ok: false, message: 'Unknown action' });
+    // No action = the admin console. Served ONLY usefully from the ADMIN
+    // deployment (Execute as: user accessing + Anyone with Google account):
+    // there Google has already forced sign-in and we can read the identity.
+    // On the anonymous public deployment the email comes back blank, so
+    // this same code path safely renders "not authorised".
+    return adminPage_();
   } catch (err) { return out_({ ok: false, message: String(err) }); }
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN CONSOLE (2-layer + PIN, mirrors the Crest Dashboard auth pattern)
+//   Layer 1: Google sign-in — enforced by the admin deployment's access
+//            setting ("Anyone with Google account", execute as USER ACCESSING
+//            so Session.getActiveUser() is reliable on consumer accounts).
+//   Layer 2: email allowlist — Global tab key admin.allowedEmails, checked on
+//            page load AND on every google.script.run call.
+//   Layer 3: the PIN + rate limit (unchanged).
+// The public "Anyone" deployment CANNOT reach admin actions at all — they are
+// not routed in doPost and adminApi throws for non-allowlisted identities.
+// ---------------------------------------------------------------------------
+function adminEmail_() {
+  return String(Session.getActiveUser().getEmail() || '').toLowerCase().trim();
+}
+function isAdmin_(email) {
+  if (!email) return false;
+  var c = readConfig_();
+  return (c._adminEmails || []).indexOf(email) >= 0;
+}
+function adminPage_() {
+  var email = adminEmail_();
+  if (!isAdmin_(email)) {
+    return HtmlService.createHtmlOutput(
+      '<div style="font-family:sans-serif;max-width:480px;margin:80px auto;padding:24px;border:1px solid #FCA5A5;border-radius:12px;background:#FEF2F2;color:#991B1B">' +
+      '<h2 style="margin:0 0 8px">Not authorised</h2>' +
+      '<p>This console is restricted. ' + (email
+        ? 'You are signed in as <b>' + email.replace(/</g, '&lt;') + '</b>, which is not on the admin list.'
+        : 'Open the ADMIN deployment URL (it requires Google sign-in) — this URL serves the public API only.') +
+      '</p></div>').setTitle('Crest Admin — not authorised');
+  }
+  var t = HtmlService.createTemplateFromFile('Admin');
+  t.adminEmail = email;
+  return t.evaluate().setTitle('Crest Pharmacies — Admin')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+// Single bridge for google.script.run from the admin console. Identity is
+// re-verified on EVERY call; `by` is ALWAYS the Google-verified email — the
+// client cannot spoof the change log.
+function adminApi(json) {
+  var email = adminEmail_();
+  if (!isAdmin_(email)) throw new Error('Not authorised.');
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var p = JSON.parse(json);
+    p.by = email;
+    if (p.action === 'adminAuth') return JSON.stringify(adminAuth_(p));
+    if (p.action === 'adminSave') return JSON.stringify(adminSave_(p));
+    if (p.action === 'adminPin') return JSON.stringify(adminPin_(p));
+    throw new Error('Unknown action');
+  } finally { lock.releaseLock(); }
+}
+// One-time migration for an already-setup() script: seed the allowlist.
+function setupAdminAccess() {
+  var ss = SpreadsheetApp.openById(PROPS.getProperty('CONFIG_SS_ID'));
+  var g = ss.getSheetByName('Global');
+  var has = g.getDataRange().getValues().some(function (r) { return r[0] === 'admin.allowedEmails'; });
+  if (!has) g.appendRow(['admin.allowedEmails', 'bmoukik@gmail.com, moukik.cyber@gmail.com']);
+  PROPS.deleteProperty('CONFIG_CACHE');
+  Logger.log('Admin allowlist ready. Edit it on the Global tab.');
 }
 
 function doPost(e) {
@@ -112,9 +180,8 @@ function doPost(e) {
     if (a === 'paid' || a === 'raise') return out_(settle_(p));
     if (a === 'cashlog') return out_(cashLog_(p.payload));
     if (a === 'ack' || a === 'query') return out_(cashDecide_(p));
-    if (a === 'adminAuth') return out_(adminAuth_(p));
-    if (a === 'adminSave') return out_(adminSave_(p));
-    if (a === 'adminPin') return out_(adminPin_(p));
+    // admin actions are NOT routed here — they exist only behind adminApi()
+    // on the Google-authenticated admin deployment.
     return out_({ ok: false, message: 'Unknown action' });
   } catch (err) {
     return out_({ ok: false, message: String(err) });
@@ -146,7 +213,8 @@ function readConfig_() {
       emails: { accounts: String(g['email.accounts'] || ''), locumHandling: String(g['email.locumHandling'] || ''), cashAck: String(g['email.cashAck'] || '') },
       locum: { reminderDays: Number(tools['locum.reminderDays']) || 2, escalateDays: Number(tools['locum.escalateDays']) || 4 },
       cash: { threshold: tools['cash.threshold'] == null ? 20 : Number(tools['cash.threshold']) },
-      _pin: { hash: String(g['adminPinHash'] || ''), salt: String(g['adminPinSalt'] || '') }
+      _pin: { hash: String(g['adminPinHash'] || ''), salt: String(g['adminPinSalt'] || '') },
+      _adminEmails: String(g['admin.allowedEmails'] || '').toLowerCase().split(',').map(function (s) { return s.trim(); }).filter(String)
     };
     PROPS.setProperty('CONFIG_CACHE', JSON.stringify(cfg)); // last-good copy
     return cfg;

@@ -1,9 +1,9 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Crest Pharmacies — Admin</title>
+<!-- Crest Pharmacies — Admin console (Apps Script HtmlService file).
+     Paste this into the Apps Script editor as an HTML file named "Admin"
+     (Code.gs serves it via createTemplateFromFile('Admin')). Served ONLY by
+     the admin deployment: Google sign-in + email allowlist + PIN — see
+     adminPage_ in Code.gs. The repo's admin.html is the demo-mode design
+     preview of this same UI; keep the two in step. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -19,30 +19,26 @@
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--txt);font-family:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
-.demo{background:#082E68;color:#cfe0ff;font-size:12.5px;text-align:center;padding:7px 12px}
 
-/* ---------- lock screen ---------- */
-.lock{min-height:calc(100vh - 34px);display:flex;align-items:center;justify-content:center;padding:24px;
+.lock{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
   background:linear-gradient(160deg,var(--rail) 0%,var(--navy-ink) 55%,var(--navy-deep) 100%)}
 .lockcard{background:var(--card);border-radius:16px;box-shadow:0 20px 60px rgba(4,16,40,.45);padding:34px 32px;width:100%;max-width:420px}
 .lockcard .brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-.lockcard .brand img{height:40px;width:40px;border-radius:9px;background:#fff;border:1px solid var(--border);padding:3px}
 .lockcard .brand .t1{font-weight:800;font-size:17px;color:var(--navy-ink)}
 .lockcard .brand .t2{font-size:12.5px;color:var(--mut);letter-spacing:.6px;text-transform:uppercase;font-weight:700}
 .lockcard h2{margin:0 0 6px;font-size:21px;color:var(--navy-ink)}
 .lockcard p.sub{color:var(--mut);margin:0 0 8px;font-size:14px;line-height:1.5}
+.idchip{display:inline-block;background:var(--accent-soft);color:var(--navy-ink);border-radius:999px;padding:6px 14px;font-size:13px;font-weight:700;font-family:var(--mono);margin:4px 0 6px}
 
-/* ---------- app shell ---------- */
-.shell{display:grid;grid-template-columns:230px 1fr;min-height:calc(100vh - 34px)}
-.rail{background:var(--rail);color:#B9CBEA;padding:18px 0 14px;display:flex;flex-direction:column;position:sticky;top:0;height:calc(100vh - 34px)}
+.shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+.rail{background:var(--rail);color:#B9CBEA;padding:18px 0 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
 .rail .brand{display:flex;align-items:center;gap:10px;padding:0 18px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
-.rail .brand img{height:32px;width:32px;border-radius:8px;background:#fff;padding:3px}
 .rail .brand .t1{font-weight:800;font-size:14.5px;color:#fff;line-height:1.2}
 .rail .brand .t2{font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:#7E9CD1}
 .rail nav{padding:12px 10px;flex:1}
 .rail a{display:block;color:#B9CBEA;text-decoration:none;font-size:13.5px;font-weight:600;padding:9px 12px;border-radius:8px;margin-bottom:2px}
 .rail a:hover{background:var(--rail-ink);color:#fff}
-.rail .who{padding:12px 18px;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px;color:#7E9CD1;line-height:1.5}
+.rail .who{padding:12px 18px;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px;color:#7E9CD1;line-height:1.5;word-break:break-all}
 .rail .who b{color:#fff}
 
 .main{padding:0 32px 80px;max-width:1120px;width:100%}
@@ -53,7 +49,6 @@ body{margin:0;background:var(--bg);color:var(--txt);font-family:'Plus Jakarta Sa
 .btn:active{background:var(--navy-deep)}
 .btn[disabled]{opacity:.55}
 .btn.green{background:var(--green)}
-.btn.red{background:var(--red)}
 .btn.wide{width:100%;padding:15px;margin-top:20px;font-size:16px}
 .btn .cnt{display:inline-block;min-width:21px;padding:1px 6px;margin-left:8px;border-radius:999px;background:#fff;color:var(--navy);font-size:12.5px;vertical-align:1px}
 .btn .cnt.zero{background:rgba(255,255,255,.25);color:#fff}
@@ -65,7 +60,6 @@ body{margin:0;background:var(--bg);color:var(--txt);font-family:'Plus Jakarta Sa
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
 
-/* ---------- tables ---------- */
 .tblwrap{overflow-x:auto}
 table.t{border-collapse:collapse;width:100%;font-size:14px}
 table.t th{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);text-align:left;font-weight:700;
@@ -88,7 +82,6 @@ table.t .nm{font-weight:700;color:var(--navy-ink)}
 .tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700;background:#FEF3C7;color:#92400E;margin-left:8px}
 input[type=checkbox]{width:19px;height:19px;accent-color:var(--navy);cursor:pointer}
 
-/* ---------- fields ---------- */
 label{display:block;font-weight:700;margin:0 0 6px;font-size:13px;color:var(--navy-ink)}
 .field input[type=email],.field input[type=number],.field input[type=text],.field input[type=password]{
   width:100%;padding:11px 12px;border:1.5px solid var(--border);border-radius:9px;font-size:14.5px;background:#fff;font-family:inherit}
@@ -100,7 +93,6 @@ label{display:block;font-weight:700;margin:0 0 6px;font-size:13px;color:var(--na
 .lockcard input{width:100%;padding:13px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:16px;font-family:inherit}
 .lockcard input#p_pin{font-family:var(--mono);letter-spacing:4px}
 .lockcard input:focus{outline:2px solid var(--accent);border-color:var(--accent)}
-.lockcard .hint{color:var(--mut);font-size:13px;margin:4px 0 0}
 
 .warn{background:#FFF7ED;border:1px solid #FDBA74;color:var(--amber);border-radius:10px;padding:11px 14px;font-size:13.5px;margin-top:12px;line-height:1.5}
 .err{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;border-radius:10px;padding:12px 14px;margin-top:12px;display:none;font-size:14px;line-height:1.65}
@@ -113,12 +105,10 @@ label{display:block;font-weight:700;margin:0 0 6px;font-size:13px;color:var(--na
 @keyframes sp{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
 
-/* confirm screen */
 .chg{margin:14px 0 0;padding-left:20px;font-size:14.5px;line-height:2}
 .chg li::marker{color:var(--accent)}
 .confirmwrap{max-width:640px;margin:40px auto 0}
 
-/* ---------- small screens (admin is desktop-first; keep it usable) ---------- */
 @media (max-width:900px){
   .shell{display:block}
   .rail{position:static;height:auto;flex-direction:row;align-items:center;padding:10px 12px;gap:6px;overflow-x:auto}
@@ -132,49 +122,12 @@ label{display:block;font-weight:700;margin:0 0 6px;font-size:13px;color:var(--na
   .topbar h1{font-size:17px}
 }
 </style>
-</head>
-<body>
-<div id="demobar" class="demo" style="display:none">Design preview — changes save on this device only. The live console is a private Google-sign-in URL (ask Moukik). Demo PIN: 0000</div>
-<div id="app"><div class="lock"><div class="lockcard center"><p><span class="spin"></span></p><p class="hint">Loading…</p></div></div></div>
+
+<div id="app"><div class="lock"><div class="lockcard center"><p><span class="spin"></span></p><p class="sub">Loading…</p></div></div></div>
 
 <script>
-// ===========================================================================
-// Crest Pharmacies — Admin / control panel
-// PIN-gated editor for the ONE shared config that every Crest tool reads:
-// pharmacies, validators, global emails, and per-tool settings (locum
-// reminder/escalation days, cash-log threshold).
-//
-// This page is the ONLY writer. Every other tool reads the config and is
-// read-only, so a mistake here is the one that matters — hence: validation,
-// the zero-validator guardrail, confirm-before-save, and a change-log row.
-// Desktop-first on purpose: this is head-office tooling, not counter tooling.
-//
-// SECURITY (do not weaken):
-//   - The PIN is NEVER stored in this file and NEVER served in the public
-//     config blob. It lives in the config sheet, and only the backend
-//     compares it. This page posts the typed PIN once and gets a short-lived
-//     session token back.
-//   - The session token is kept in memory only (never localStorage), so
-//     closing the tab ends the session.
-//   - The backend MUST rate-limit adminAuth (see BACKEND_SPEC.md) — a 4-6
-//     digit PIN on an open endpoint is brute-forceable without it.
-//
-// BACKEND CONTRACT (shared Apps Script; config lives in its own spreadsheet):
-//   POST {action:'adminAuth', pin, by}
-//        -> {ok, session, config, defaultPin:bool}
-//         | {ok:false, code:'badpin'|'locked', message}
-//   POST {action:'adminSave', session, by, config, changes:[str]}
-//        -> {ok, updatedAt} | {ok:false, code:'session'|'validation', errors:[]}
-//   POST {action:'adminPin', session, by, newPin}  -> {ok} | {ok:false, ...}
-//   GET  ?action=config  -> public read-only blob for the tools (NO pin)
-// ===========================================================================
-// This page is the DEMO/design preview only. The LIVE admin console is served
-// by Apps Script itself (see AdminConsole.html + adminPage_ in Code.gs) behind
-// Google sign-in + an email allowlist + the PIN — admin actions were removed
-// from the public API, so this page cannot administrate anything even if
-// pointed at it.
-var API_URL = '__API_URL__';
-var DEMO = API_URL.indexOf('__') === 0;
+// Identity is Google-verified server-side; shown here for the UI only.
+var WHO = '<?= adminEmail ?>';
 
 var $app = document.getElementById('app');
 function h(html){ $app.innerHTML = html; }
@@ -183,24 +136,20 @@ function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,
 function clone(o){ return JSON.parse(JSON.stringify(o)); }
 var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// The one transport: google.script.run -> adminApi (identity re-checked there)
 function apiPost(body){
-  if(DEMO) return demo(body);
-  return fetch(API_URL,{method:'POST',body:JSON.stringify(body)}).then(function(r){return r.text()}).then(JSON.parse);
+  return new Promise(function(resolve, reject){
+    google.script.run
+      .withSuccessHandler(function(s){ try{ resolve(JSON.parse(s)); }catch(e){ reject(e); } })
+      .withFailureHandler(reject)
+      .adminApi(JSON.stringify(body));
+  });
 }
-function fatal(msg){
-  h('<div class="lock"><div class="lockcard"><div class="banner bad">'+esc(msg)+'</div>'+
-    '<button class="btn wide" onclick="location.reload()">Try again</button></div></div>');
-}
 
-var LOGO = "data:image/png;base64,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";
+var SESSION=null, CONFIG=null, ORIG=null, DEFAULT_PIN=false;
 
-// session state — in memory only, on purpose
-var SESSION=null, WHO='', CONFIG=null, ORIG=null, DEFAULT_PIN=false;
-
-if(DEMO) $('demobar').style.display='block';
 pinPage();
 
-// live pending-change counter — the header button ticks as you edit
 $app.addEventListener('input', updateCount);
 $app.addEventListener('change', updateCount);
 function updateCount(){
@@ -210,41 +159,37 @@ function updateCount(){
   el.className='cnt'+(n?'':' zero');
 }
 
-// ===========================================================================
-// PIN GATE — a lock screen, not a form
-// ===========================================================================
+// PIN gate — Google sign-in and the allowlist have already passed server-side;
+// this is the third layer.
 function pinPage(msg){
   h('<div class="lock"><div class="lockcard">'+
-    '<div class="brand"><img alt="" src="'+LOGO+'"><div><div class="t1">Crest Pharmacies</div><div class="t2">Admin console</div></div></div>'+
-    '<h2>Sign in</h2>'+
-    '<p class="sub">This console sets the pharmacies, validators, emails and settings that every Crest tool reads. Changes take effect for everyone.</p>'+
+    '<div class="brand"><div><div class="t1">Crest Pharmacies</div><div class="t2">Admin console</div></div></div>'+
+    '<h2>Enter the PIN</h2>'+
+    '<p class="sub">Google-verified as</p><span class="idchip">'+esc(WHO)+'</span>'+
+    '<p class="sub">This console sets the pharmacies, validators, emails and settings that every Crest tool reads.</p>'+
     (msg?'<div class="banner bad">'+esc(msg)+'</div>':'')+
-    '<label>Your name</label><input type="text" id="p_who" autocomplete="name">'+
-    '<p class="hint">Recorded against every change you make.</p>'+
     '<label>Admin PIN</label><input type="password" id="p_pin" inputmode="numeric" autocomplete="off">'+
-    '<button type="button" class="btn wide" id="pinbtn">Sign in</button>'+
+    '<button type="button" class="btn wide" id="pinbtn">Open console</button>'+
     '</div></div>');
-  $('p_who').value = WHO || '';
   $('pinbtn').onclick = doAuth;
   $('p_pin').onkeydown = function(e){ if(e.key==='Enter') doAuth(); };
+  $('p_pin').focus();
 }
 function doAuth(){
-  var who=$('p_who').value.trim(), pin=$('p_pin').value.trim();
-  if(!who) return pinPage('Enter your name — every change is logged against it.');
+  var pin=$('p_pin').value.trim();
   if(!pin) return pinPage('Enter the admin PIN.');
   var btn=$('pinbtn'); btn.disabled=true; btn.textContent='Checking…';
-  apiPost({action:'adminAuth', pin:pin, by:who}).then(function(res){
+  apiPost({action:'adminAuth', pin:pin}).then(function(res){
     if(!res.ok){
       if(res.code==='locked') return pinPage(res.message||'Too many wrong PINs. Locked for a while — try later.');
       return pinPage('That PIN is not right.');
     }
-    SESSION=res.session; WHO=who; DEFAULT_PIN=!!res.defaultPin;
+    SESSION=res.session; DEFAULT_PIN=!!res.defaultPin;
     CONFIG=normalise(res.config); ORIG=clone(CONFIG);
     renderMain();
-  }).catch(function(){ pinPage('No connection — check your signal and try again.'); });
+  }).catch(function(e){ pinPage(String(e && e.message || e)); });
 }
 
-// Fail safe: never render a half-shaped config into an editor that saves it back.
 function normalise(c){
   c = c || {};
   c.pharmacies = c.pharmacies || [];
@@ -260,13 +205,10 @@ function normalise(c){
   return c;
 }
 
-// ===========================================================================
-// APP SHELL
-// ===========================================================================
 function shell(content){
   return '<div class="shell">'+
     '<aside class="rail">'+
-      '<div class="brand"><img alt="" src="'+LOGO+'"><div><div class="t1">Crest Pharmacies</div><div class="t2">Admin console</div></div></div>'+
+      '<div class="brand"><div><div class="t1">Crest Pharmacies</div><div class="t2">Admin console</div></div></div>'+
       '<nav>'+
         '<a href="#sec-pharm">Pharmacies</a>'+
         '<a href="#sec-val">Validators</a>'+
@@ -275,15 +217,12 @@ function shell(content){
         '<a href="#sec-cash">Cash log</a>'+
         '<a href="#sec-pin">Security</a>'+
       '</nav>'+
-      '<div class="who">Signed in as <b>'+esc(WHO)+'</b><br>Every save is logged: who, when, what.</div>'+
+      '<div class="who">Signed in as <b>'+esc(WHO)+'</b><br>Every save is logged against this Google account.</div>'+
     '</aside>'+
     '<div class="main">'+content+'</div>'+
     '</div>';
 }
 
-// ===========================================================================
-// MAIN EDITOR
-// ===========================================================================
 function activeValCount(phName){
   return CONFIG.validators.filter(function(v){return v.pharmacy===phName && v.active;}).length;
 }
@@ -370,7 +309,7 @@ function renderMain(errs){
 
     '<div class="sec" id="sec-pin">'+
     '<h2>Security</h2>'+
-    '<p class="sub">Changes the PIN for this console. Nothing else uses it.</p>'+
+    '<p class="sub">Three locks on this console: your Google sign-in, the admin allowlist (Global tab of the config sheet), and this PIN.</p>'+
     '<div id="pinmsg"></div>'+
     '<div class="grid3">'+
     '<div class="field"><label>New PIN (4–8 digits)</label><input type="password" id="np1" inputmode="numeric" autocomplete="new-password"></div>'+
@@ -385,7 +324,6 @@ function renderMain(errs){
 }
 
 function bindMain(){
-  // structural edits re-render; field edits just update state
   document.querySelectorAll('[data-rmph]').forEach(function(b){
     b.onclick=function(){ pull(); CONFIG.pharmacies.splice(Number(b.dataset.rmph),1); renderMain(); };
   });
@@ -417,7 +355,6 @@ function bindMain(){
   $('reviewbtn').onclick=function(){ pull(); review(); };
 }
 
-// read every editable field back into CONFIG
 function pull(){
   document.querySelectorAll('[data-vname]').forEach(function(el){ CONFIG.validators[Number(el.dataset.vname)].name=el.value.trim(); });
   document.querySelectorAll('[data-vemail]').forEach(function(el){ CONFIG.validators[Number(el.dataset.vemail)].email=el.value.trim(); });
@@ -434,9 +371,6 @@ function pull(){
   }
 }
 
-// ===========================================================================
-// VALIDATION — the guardrails
-// ===========================================================================
 function validate(){
   var e=[];
   var names={};
@@ -453,7 +387,6 @@ function validate(){
     else if(!CONFIG.pharmacies.some(function(p){return p.name===v.pharmacy;}))
       e.push(who+' is linked to "'+v.pharmacy+'", which is not in the pharmacy list.');
   });
-  // the important one: an in-use pharmacy with nobody who can approve
   CONFIG.pharmacies.filter(function(p){return p.active;}).forEach(function(p){
     if(!activeValCount(p.name)) e.push(p.name+' is in use but has no validator switched on — claims there could not be approved by anyone.');
   });
@@ -469,9 +402,6 @@ function validate(){
   return e;
 }
 
-// ===========================================================================
-// CHANGE LOG — plain English, shown before saving and stored with the save
-// ===========================================================================
 function vkey(v){ return v.pharmacy+' | '+v.name; }
 function diff(){
   var out=[];
@@ -511,9 +441,6 @@ function diff(){
   return out;
 }
 
-// ===========================================================================
-// CONFIRM + SAVE
-// ===========================================================================
 function review(){
   var errs=validate();
   if(errs.length) return renderMain(errs);
@@ -524,7 +451,7 @@ function review(){
   h(shell(
     '<div class="confirmwrap"><div class="sec">'+
     '<h2>Confirm changes</h2>'+
-    '<p class="sub">These take effect for every Crest tool as soon as you save. Saved as <b>'+esc(WHO)+'</b>.</p>'+
+    '<p class="sub">These take effect for every Crest tool as soon as you save. Logged against <b>'+esc(WHO)+'</b>.</p>'+
     '<ul class="chg">'+changes.map(function(c){return '<li>'+esc(c)+'</li>'}).join('')+'</ul>'+
     '<div class="err" id="saveerr"></div>'+
     '<button type="button" class="btn green wide" id="savebtn">Save these '+changes.length+' change'+(changes.length>1?'s':'')+'</button>'+
@@ -538,9 +465,9 @@ function review(){
 
 function save(changes){
   var btn=$('savebtn'); btn.disabled=true; btn.textContent='Saving…';
-  apiPost({action:'adminSave', session:SESSION, by:WHO, config:CONFIG, changes:changes}).then(function(res){
+  apiPost({action:'adminSave', session:SESSION, config:CONFIG, changes:changes}).then(function(res){
     if(!res.ok){
-      if(res.code==='session'){ SESSION=null; return pinPage('Your session timed out — sign in again. Nothing was saved.'); }
+      if(res.code==='session'){ SESSION=null; return pinPage('Your session timed out — enter the PIN again. Nothing was saved.'); }
       var b=$('saveerr');
       b.innerHTML='<b>Not saved:</b><br>'+(res.errors||[res.message||'Something went wrong — try again.']).map(function(m){return '• '+esc(m)}).join('<br>');
       b.style.display='block';
@@ -552,14 +479,14 @@ function save(changes){
       '<div class="confirmwrap"><div class="sec center">'+
       '<h2>Saved</h2>'+
       '<div class="banner good">'+changes.length+' change'+(changes.length>1?'s':'')+' saved. Every tool picks '+(changes.length>1?'them':'it')+' up straight away.</div>'+
-      '<p class="sub" style="margin-top:10px">Recorded against '+esc(WHO)+'.</p>'+
+      '<p class="sub" style="margin-top:10px">Logged against '+esc(WHO)+'.</p>'+
       '<button class="btn wide" id="donebtn">Back to settings</button></div></div>'
     ));
     $('donebtn').onclick=function(){ renderMain(); };
     window.scrollTo(0,0);
-  }).catch(function(){
+  }).catch(function(e){
     var b=$('saveerr');
-    b.innerHTML='• No connection — nothing was saved. Check your signal and press Save again.';
+    b.innerHTML='• '+esc(String(e && e.message || e))+' — nothing was saved.';
     b.style.display='block';
     btn.disabled=false; btn.textContent='Save these changes';
   });
@@ -571,76 +498,17 @@ function changePin(){
   if(!/^\d{4,8}$/.test(a)) return say('bad','The PIN must be 4 to 8 digits.');
   if(a!==b) return say('bad','The two PINs do not match.');
   var btn=$('pinsave'); btn.disabled=true; btn.textContent='Changing…';
-  apiPost({action:'adminPin', session:SESSION, by:WHO, newPin:a}).then(function(res){
+  apiPost({action:'adminPin', session:SESSION, newPin:a}).then(function(res){
     btn.disabled=false; btn.textContent='Change PIN';
     if(!res.ok){
-      if(res.code==='session'){ SESSION=null; return pinPage('Your session timed out — sign in again.'); }
+      if(res.code==='session'){ SESSION=null; return pinPage('Your session timed out — enter the PIN again.'); }
       return say('bad', res.message||'Could not change the PIN — try again.');
     }
     DEFAULT_PIN=false; $('np1').value=''; $('np2').value='';
     say('good','PIN changed. Use the new one next time.');
-  }).catch(function(){
+  }).catch(function(e){
     btn.disabled=false; btn.textContent='Change PIN';
-    say('bad','No connection — the PIN was NOT changed.');
+    say('bad',String(e && e.message || e));
   });
 }
-
-// ===========================================================================
-// DEMO BACKEND (only runs when API_URL is not configured)
-// Mirrors the real contract so the whole panel is clickable with no server.
-// Config lives in localStorage; PIN is 0000 until changed.
-// Test emails are moukik.cyber+… gmail aliases so every stream lands in one
-// inbox, pre-labelled — no real company addresses until go-live.
-// ===========================================================================
-var DEMO_DEFAULT = {
-  pharmacies:[
-    {name:'Crest — High Street', active:true},
-    {name:'Crest — Riverside', active:true},
-    {name:'Crest — Market Square', active:true},
-    {name:'Crest — Station Road', active:true}
-  ],
-  validators:[
-    {pharmacy:'Crest — High Street', name:'Sam Okafor', email:'moukik.cyber+val.sam@gmail.com', active:true},
-    {pharmacy:'Crest — Riverside', name:'Priya Shah', email:'moukik.cyber+val.priya@gmail.com', active:true},
-    {pharmacy:'Crest — Market Square', name:'Tom Ellis', email:'moukik.cyber+val.tom@gmail.com', active:true},
-    {pharmacy:'Crest — Station Road', name:'Aisha Khan', email:'moukik.cyber+val.aisha@gmail.com', active:true}
-  ],
-  emails:{accounts:'moukik.cyber+accounts@gmail.com', locumHandling:'moukik.cyber+locumdesk@gmail.com', cashAck:'moukik.cyber+cashack@gmail.com'},
-  locum:{reminderDays:2, escalateDays:4},
-  cash:{threshold:20}
-};
-function demoCfg(){
-  try{ var s=localStorage.getItem('crest_config'); if(s) return JSON.parse(s); }catch(e){}
-  return clone(DEMO_DEFAULT);
-}
-function demoSaveCfg(c){ try{ localStorage.setItem('crest_config', JSON.stringify(c)); }catch(e){} }
-function demoPin(){ try{ return localStorage.getItem('crest_pin') || '0000'; }catch(e){ return '0000'; } }
-function demo(p){
-  return new Promise(function(resolve){ setTimeout(function(){ resolve(demoHandle(p)); }, 250); });
-}
-function demoHandle(p){
-  if(p.action==='adminAuth'){
-    if(String(p.pin)!==demoPin()) return {ok:false, code:'badpin'};
-    return {ok:true, session:'demo-session', config:demoCfg(), defaultPin:demoPin()==='0000'};
-  }
-  if(p.action==='adminSave'){
-    if(p.session!=='demo-session') return {ok:false, code:'session'};
-    demoSaveCfg(p.config);
-    try{
-      var log=JSON.parse(localStorage.getItem('crest_config_log')||'[]');
-      p.changes.forEach(function(c){ log.push({at:new Date().toISOString(), by:p.by, change:c}); });
-      localStorage.setItem('crest_config_log', JSON.stringify(log));
-      console.log('%c[DEMO] change log', 'color:#0D47A1;font-weight:bold', log);
-    }catch(e){}
-    return {ok:true, updatedAt:new Date().toISOString()};
-  }
-  if(p.action==='adminPin'){
-    if(p.session!=='demo-session') return {ok:false, code:'session'};
-    try{ localStorage.setItem('crest_pin', String(p.newPin)); }catch(e){}
-    return {ok:true};
-  }
-  return {ok:false, message:'Unknown action'};
-}
 </script>
-</body>
-</html>

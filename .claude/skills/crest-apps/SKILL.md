@@ -196,6 +196,16 @@ Notion "run backend setup + deploy" todo, which holds the backend Code.gs).
    first login through the panel. The page nags until it changes. The PIN is
    never in the HTML and never in the public config blob; only the backend
    compares it, and it must rate-limit (5 fails/hour → 30 min lock).
+   **UPGRADED 17 Jul 2026 (Moukik: admin needs the dashboard's 2-layer model):**
+   the live console is a SEPARATE Apps Script deployment (Execute as: user
+   accessing, access: Anyone with Google account) serving `AdminConsole.html`
+   (pasted in the editor as file "Admin") — Google sign-in + `admin.allowedEmails`
+   allowlist (Global tab) + the PIN, three layers. Admin actions were REMOVED
+   from the public "Anyone" API (`doPost` no longer routes them); change-log
+   `by` = the Google-verified email. Allowlisted admins need Editor on the
+   Crest Config spreadsheet (script runs as the user). At go-live on the
+   company account, switch to DOMAIN access like the dashboard. The repo's
+   `admin.html` is the demo/design preview only.
 2. **Accounts** — **one shared inbox** (a single global email in admin, not a
    list of named people). To keep the non-repudiation rule, the accounts step
    requires a **typed name** on Paid / send-back, remembered per device in

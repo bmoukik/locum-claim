@@ -130,6 +130,34 @@ One row per change line the admin page sends. Never update or delete rows.
 
 ## 4. Admin actions
 
+**Admin rides its own deployment — the dashboard's 2-layer pattern + the PIN.**
+The admin console has centralised control of every tool, so it does NOT sit on
+the public "Anyone" web app. Two deployments of the same script:
+
+| Deployment | Execute as | Who has access | Serves |
+|---|---|---|---|
+| Public API | Me | Anyone | locum + cash pages (JSON), `?action=config` |
+| **Admin console** | **User accessing** | **Anyone with Google account** | the HtmlService console (`Admin` file) |
+
+Layers on the admin deployment:
+1. **Google sign-in** — forced by the access setting before the page loads.
+2. **Email allowlist** — Global tab key `admin.allowedEmails` (comma-separated),
+   checked in `adminPage_` on load AND in `adminApi` on every call. "Execute as
+   user accessing" is what makes `Session.getActiveUser().getEmail()` reliable
+   on consumer Gmail accounts (the dashboard uses DOMAIN access for the same
+   guarantee — switch to that model at go-live on the company account).
+3. **PIN + rate limit** — unchanged, below.
+
+Consequences:
+- `adminAuth`/`adminSave`/`adminPin` are **not routed in `doPost`** — the
+  public URL cannot reach them at all, PIN or no PIN.
+- The change log's `by` is the **Google-verified email**, set server-side —
+  the client cannot spoof it.
+- Because the script runs AS the admin user, each allowlisted email needs
+  **Editor access to the Crest Config spreadsheet** (share it once). The Data
+  spreadsheet is not touched by admin actions — no share needed.
+- The repo's `admin.html` is a demo-mode design preview only.
+
 ### `POST {action:'adminAuth', pin, by}`
 → `{ok:true, session, config, defaultPin:bool}`
 → `{ok:false, code:'badpin'}` | `{ok:false, code:'locked', message}`
