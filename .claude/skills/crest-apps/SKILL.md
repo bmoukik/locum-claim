@@ -19,9 +19,9 @@ head office / accounts is a separate department.
 
 | File | Purpose | Status |
 |---|---|---|
-| `index.html` | **Locum payment claim** — locum submits hours/rate/bank details → chosen validator approves via token link → accounts pays by transfer | Live; phase-1 changes pending (see handoff) — **going live together with cash log + admin** |
-| `cash-log.html` | **Till outflow log** — manager records any cash leaving the till (locum cash, team lunch, petty supplies, travel, refunds…) | Frontend complete, demo mode; **going live with locum + admin** |
-| `admin.html` | **Admin / control panel** — PIN-gated settings for the whole tool family (pharmacies, validators, emails, per-tool knobs) | **PLANNED, phase 1 — not built yet** |
+| `index.html` | **Locum payment claim** — locum submits hours/rate/bank details → chosen validator approves via token link → accounts pays by transfer, or sends it back | **Phase-1 frontend DONE 17 Jul 2026** (accounts step, 2 flags, self-approval block, demo mode added); awaiting backend deploy |
+| `cash-log.html` | **Till outflow log** — manager records any cash leaving the till (locum cash, team lunch, petty supplies, travel, refunds…) | **Phase-1 frontend DONE 17 Jul 2026** (shared config + device-remembers-branch); awaiting backend deploy |
+| `admin.html` | **Admin / control panel** — PIN-gated settings for the whole tool family (pharmacies, validators, emails, per-tool knobs) | **BUILT 17 Jul 2026**, demo mode, verified end-to-end; awaiting backend deploy |
 | `stock-transfer.html` | **Inter-branch emergency stock transfer note** — sender logs what moved, receiving branch taps Received | Frontend complete, demo mode; **ON HOLD** (not in this go-live) |
 
 Screenshots of all flows live in `crest/screenshots/` (generated with
@@ -190,13 +190,66 @@ drop-in-ready. The Apps Script backend (reads/writes the config sheet, sends
 emails, runs reminders) is the **deploy step**, done outside this repo (see the
 Notion "run backend setup + deploy" todo, which holds the backend Code.gs).
 
-## Open inputs still needed before/at build
+## Open inputs — ALL ANSWERED 17 Jul 2026 (do not re-ask)
 
-1. **Admin PIN** — a real one, or a placeholder baked into config to change on
-   first login.
-2. **Accounts** — one shared `accounts@` inbox, or named people (like the
-   validators)?
-3. Confirm the **reminder cadence** (2 working days / escalate at 4 default).
+1. **Admin PIN** — placeholder `0000`, seeded as a salted hash, changed on
+   first login through the panel. The page nags until it changes. The PIN is
+   never in the HTML and never in the public config blob; only the backend
+   compares it, and it must rate-limit (5 fails/hour → 30 min lock).
+2. **Accounts** — **one shared inbox** (a single global email in admin, not a
+   list of named people). To keep the non-repudiation rule, the accounts step
+   requires a **typed name** on Paid / send-back, remembered per device in
+   `crest_accounts_name`. Upgrade path if the typed name proves too weak: a
+   named-people list like the validators.
+3. **Reminder cadence** — **confirmed as the default**: remind the validator at
+   2 working days, escalate to locum-handling at 4. Both live in config.
+4. **Emails — TESTING RULE:** no `@crestpharmacy.com` addresses anywhere yet.
+   Personal/placeholder addresses only, set through admin. Swapping to real
+   company addresses is the LAST go-live step, after end-to-end testing. The
+   admin page carries this as a visible warning.
+
+## Phase-1 build state (17 Jul 2026)
+
+Frontend is **done and verified in demo mode** on branch
+`claude/locum-payments-context-brflyu`; the backend is the remaining work.
+
+- `admin.html` built: PIN gate, pharmacies, validators, emails, locum timings,
+  cash threshold, PIN change. Guardrails verified live: wrong PIN rejected,
+  zero-active-validator blocked, invalid email caught, confirm-before-save,
+  plain-English change log written with who/when/what.
+  **Redesigned desktop-first 17 Jul 2026** (Moukik: "admin is used on a PC,
+  not a phone") — dark navy rail + wide work surface + real tables, unlike the
+  phone apps. Signature element: live "Review changes (n)" counter in the
+  header that ticks as you edit. Lock-screen PIN gate. Mobile degrades to
+  pill nav + scrollable tables. All logic/guardrails unchanged and re-verified.
+- **Test emails are Gmail plus-aliases of bmoukik@gmail.com** (17 Jul 2026):
+  validators `moukik.cyber+val.<name>@`, accounts `moukik.cyber+accounts@`, escalations
+  `moukik.cyber+locumdesk@`, cash acks `moukik.cyber+cashack@`, test locums
+  `moukik.cyber+locum.<name>@`. One inbox sees every stream. Gmail labels created
+  under "Crest apps/" (Validators, Accounts, Locums, Cash log, Locum desk);
+  the to:-address FILTERS must be added manually in Gmail settings (no API for
+  filters). Deploy the Apps Script on the admin/ops account, NOT bmoukik@ —
+  Gmail does not reliably filter self-sent mail. Caveats in BACKEND_SPEC.md.
+- `index.html`: accounts step (**Paid ✓** emails the locum / **send it back**
+  to validator or locum with a reason), both flags (duplicate days, bank
+  changed) shown to validator AND accounts, self-approval block, demo mode
+  ported from the cash log. Verified: validator view never receives the `bank`
+  object.
+- `cash-log.html`: threshold/pharmacies from shared config, device remembers
+  branch + name (`crest_branch`, `crest_name`).
+- **`BACKEND_SPEC.md`** written — config sheet layout, every action, token
+  rules, the reminder/escalation cron, and a go-live checklist. The flag rules
+  and self-approval block are mirrored in the page JS; change both or they drift.
+- Demo mode shares one `crest_config` in localStorage across all three pages, so
+  editing a validator or the threshold in admin shows up in the other apps —
+  the real architecture in miniature (admin writes, every tool reads).
+
+**Decisions taken while building** (didn't need a steer, flag if wrong):
+- No rename button for pharmacies — past claims point at the name string, so
+  renaming would orphan history. Add-new + switch-old-off instead.
+- Cash categories stay in config but out of the admin UI (thin, per the plan).
+- Validator identity comes from their token (emailed only to them), so they
+  never type a name; accounts type one because they share an inbox.
 
 ## Parked / later (do not build now)
 

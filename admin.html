@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crest Pharmacies — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#0D47A1; --navy-deep:#0A3A85; --navy-ink:#082E68; --rail:#081F49; --rail-ink:#0A2757;
+  --accent:#4F88E4; --accent-soft:#EAF1FC;
+  --bg:#F2F5FA; --card:#FFFFFF; --border:#DCE3EF; --border-light:#E9EEF6;
+  --green:#1E9E5A; --red:#D7382B; --amber:#B45309;
+  --txt:#1b2537; --mut:#59647d;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --shadow:0 1px 2px rgba(13,47,104,.05),0 2px 10px rgba(13,47,104,.05);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
+.demo{background:#082E68;color:#cfe0ff;font-size:12.5px;text-align:center;padding:7px 12px}
+
+/* ---------- lock screen ---------- */
+.lock{min-height:calc(100vh - 34px);display:flex;align-items:center;justify-content:center;padding:24px;
+  background:linear-gradient(160deg,var(--rail) 0%,var(--navy-ink) 55%,var(--navy-deep) 100%)}
+.lockcard{background:var(--card);border-radius:16px;box-shadow:0 20px 60px rgba(4,16,40,.45);padding:34px 32px;width:100%;max-width:420px}
+.lockcard .brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.lockcard .brand img{height:40px;width:40px;border-radius:9px;background:#fff;border:1px solid var(--border);padding:3px}
+.lockcard .brand .t1{font-weight:800;font-size:17px;color:var(--navy-ink)}
+.lockcard .brand .t2{font-size:12.5px;color:var(--mut);letter-spacing:.6px;text-transform:uppercase;font-weight:700}
+.lockcard h2{margin:0 0 6px;font-size:21px;color:var(--navy-ink)}
+.lockcard p.sub{color:var(--mut);margin:0 0 8px;font-size:14px;line-height:1.5}
+
+/* ---------- app shell ---------- */
+.shell{display:grid;grid-template-columns:230px 1fr;min-height:calc(100vh - 34px)}
+.rail{background:var(--rail);color:#B9CBEA;padding:18px 0 14px;display:flex;flex-direction:column;position:sticky;top:0;height:calc(100vh - 34px)}
+.rail .brand{display:flex;align-items:center;gap:10px;padding:0 18px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
+.rail .brand img{height:32px;width:32px;border-radius:8px;background:#fff;padding:3px}
+.rail .brand .t1{font-weight:800;font-size:14.5px;color:#fff;line-height:1.2}
+.rail .brand .t2{font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:#7E9CD1}
+.rail nav{padding:12px 10px;flex:1}
+.rail a{display:block;color:#B9CBEA;text-decoration:none;font-size:13.5px;font-weight:600;padding:9px 12px;border-radius:8px;margin-bottom:2px}
+.rail a:hover{background:var(--rail-ink);color:#fff}
+.rail .who{padding:12px 18px;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px;color:#7E9CD1;line-height:1.5}
+.rail .who b{color:#fff}
+
+.main{padding:0 32px 80px;max-width:1120px;width:100%}
+.topbar{position:sticky;top:0;z-index:5;background:linear-gradient(to bottom,var(--bg) 82%,rgba(242,245,250,0));
+  display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 0 12px}
+.topbar h1{margin:0;font-size:20px;color:var(--navy-ink)}
+.btn{background:var(--navy);color:#fff;border:0;padding:12px 22px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.btn:active{background:var(--navy-deep)}
+.btn[disabled]{opacity:.55}
+.btn.green{background:var(--green)}
+.btn.red{background:var(--red)}
+.btn.wide{width:100%;padding:15px;margin-top:20px;font-size:16px}
+.btn .cnt{display:inline-block;min-width:21px;padding:1px 6px;margin-left:8px;border-radius:999px;background:#fff;color:var(--navy);font-size:12.5px;vertical-align:1px}
+.btn .cnt.zero{background:rgba(255,255,255,.25);color:#fff}
+.btn2{background:#fff;color:var(--navy);border:1.5px dashed var(--accent);padding:10px 16px;border-radius:9px;cursor:pointer;font-size:13.5px;font-weight:600;font-family:inherit}
+
+.sec{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:22px 24px;margin-top:18px;scroll-margin-top:76px}
+.sec h2{margin:0 0 2px;font-size:16.5px;color:var(--navy-ink)}
+.sec p.sub{color:var(--mut);margin:0 0 14px;font-size:13.5px;line-height:1.5}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+
+/* ---------- tables ---------- */
+.tblwrap{overflow-x:auto}
+table.t{border-collapse:collapse;width:100%;font-size:14px}
+table.t th{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);text-align:left;font-weight:700;
+  padding:8px 10px;border-bottom:2px solid var(--border-light)}
+table.t td{padding:6px 10px;border-bottom:1px solid var(--border-light);vertical-align:middle}
+table.t tr:hover td{background:#FAFCFF}
+table.t input[type=text],table.t input[type=email],table.t select{
+  width:100%;min-width:120px;border:1.5px solid transparent;background:transparent;border-radius:8px;padding:8px 8px;font-size:14px;font-family:inherit;color:var(--txt)}
+table.t input[type=email]{font-family:var(--mono);font-size:13px;min-width:230px}
+table.t input:hover,table.t select:hover{border-color:var(--border)}
+table.t input:focus,table.t select:focus{outline:none;border-color:var(--accent);background:#fff}
+table.t .nm{font-weight:700;color:var(--navy-ink)}
+.mini{background:#fff;color:var(--red);border:1.5px solid #FCA5A5;border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit}
+.mini:hover{background:#FEF2F2}
+.addrow{display:flex;gap:10px;margin-top:14px;align-items:center}
+.addrow input{flex:1;max-width:340px;padding:10px 12px;border:1.5px solid var(--border);border-radius:9px;font-size:14px;font-family:inherit}
+.addrow input:focus{outline:2px solid var(--accent);border-color:var(--accent)}
+.cov{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;background:var(--accent-soft);color:var(--navy-ink)}
+.cov.none{background:#FEF3C7;color:#92400E}
+.tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700;background:#FEF3C7;color:#92400E;margin-left:8px}
+input[type=checkbox]{width:19px;height:19px;accent-color:var(--navy);cursor:pointer}
+
+/* ---------- fields ---------- */
+label{display:block;font-weight:700;margin:0 0 6px;font-size:13px;color:var(--navy-ink)}
+.field input[type=email],.field input[type=number],.field input[type=text],.field input[type=password]{
+  width:100%;padding:11px 12px;border:1.5px solid var(--border);border-radius:9px;font-size:14.5px;background:#fff;font-family:inherit}
+.field input[type=email]{font-family:var(--mono);font-size:13.5px}
+.field input[type=number],.field input[type=password]{font-family:var(--mono)}
+.field input:focus{outline:2px solid var(--accent);border-color:var(--accent)}
+.field .hint{color:var(--mut);font-size:12.5px;margin:5px 0 0;line-height:1.45}
+.lockcard label{margin-top:16px;font-size:14px}
+.lockcard input{width:100%;padding:13px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:16px;font-family:inherit}
+.lockcard input#p_pin{font-family:var(--mono);letter-spacing:4px}
+.lockcard input:focus{outline:2px solid var(--accent);border-color:var(--accent)}
+.lockcard .hint{color:var(--mut);font-size:13px;margin:4px 0 0}
+
+.warn{background:#FFF7ED;border:1px solid #FDBA74;color:var(--amber);border-radius:10px;padding:11px 14px;font-size:13.5px;margin-top:12px;line-height:1.5}
+.err{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;border-radius:10px;padding:12px 14px;margin-top:12px;display:none;font-size:14px;line-height:1.65}
+.banner{border-radius:10px;padding:13px 15px;font-size:14.5px;margin-top:12px;line-height:1.5}
+.banner.info{background:var(--accent-soft);color:var(--navy-ink)}
+.banner.good{background:#DCFCE7;color:#14532D}
+.banner.bad{background:#FEE2E2;color:#991B1B}
+.center{text-align:center}
+.spin{display:inline-block;width:22px;height:22px;border:3px solid var(--accent-soft);border-top-color:var(--navy);border-radius:50%;animation:sp .8s linear infinite;vertical-align:middle}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+
+/* confirm screen */
+.chg{margin:14px 0 0;padding-left:20px;font-size:14.5px;line-height:2}
+.chg li::marker{color:var(--accent)}
+.confirmwrap{max-width:640px;margin:40px auto 0}
+
+/* ---------- small screens (admin is desktop-first; keep it usable) ---------- */
+@media (max-width:900px){
+  .shell{display:block}
+  .rail{position:static;height:auto;flex-direction:row;align-items:center;padding:10px 12px;gap:6px;overflow-x:auto}
+  .rail .brand{border:0;padding:0 10px 0 0;flex:none}
+  .rail .brand .t2{display:none}
+  .rail nav{display:flex;padding:0;gap:4px}
+  .rail a{white-space:nowrap;padding:7px 10px}
+  .rail .who{display:none}
+  .main{padding:0 14px 70px}
+  .grid2,.grid3{grid-template-columns:1fr}
+  .topbar h1{font-size:17px}
+}
+</style>
+</head>
+<body>
+<div id="demobar" class="demo" style="display:none">Demo mode — changes are saved on this device only, not to the live config. Demo PIN: 0000</div>
+<div id="app"><div class="lock"><div class="lockcard center"><p><span class="spin"></span></p><p class="hint">Loading…</p></div></div></div>
+
+<script>
+// ===========================================================================
+// Crest Pharmacies — Admin / control panel
+// PIN-gated editor for the ONE shared config that every Crest tool reads:
+// pharmacies, validators, global emails, and per-tool settings (locum
+// reminder/escalation days, cash-log threshold).
+//
+// This page is the ONLY writer. Every other tool reads the config and is
+// read-only, so a mistake here is the one that matters — hence: validation,
+// the zero-validator guardrail, confirm-before-save, and a change-log row.
+// Desktop-first on purpose: this is head-office tooling, not counter tooling.
+//
+// SECURITY (do not weaken):
+//   - The PIN is NEVER stored in this file and NEVER served in the public
+//     config blob. It lives in the config sheet, and only the backend
+//     compares it. This page posts the typed PIN once and gets a short-lived
+//     session token back.
+//   - The session token is kept in memory only (never localStorage), so
+//     closing the tab ends the session.
+//   - The backend MUST rate-limit adminAuth (see BACKEND_SPEC.md) — a 4-6
+//     digit PIN on an open endpoint is brute-forceable without it.
+//
+// BACKEND CONTRACT (shared Apps Script; config lives in its own spreadsheet):
+//   POST {action:'adminAuth', pin, by}
+//        -> {ok, session, config, defaultPin:bool}
+//         | {ok:false, code:'badpin'|'locked', message}
+//   POST {action:'adminSave', session, by, config, changes:[str]}
+//        -> {ok, updatedAt} | {ok:false, code:'session'|'validation', errors:[]}
+//   POST {action:'adminPin', session, by, newPin}  -> {ok} | {ok:false, ...}
+//   GET  ?action=config  -> public read-only blob for the tools (NO pin)
+// ===========================================================================
+var API_URL = 'https://script.google.com/macros/s/AKfycbzo_SG8akvk_7P82WXMGmAuHfeTcU_xZj1nahQSJ8x9h24445oO1NyWIJhwPDvB2kc0/exec';
+var DEMO = API_URL.indexOf('__') === 0;
+
+var $app = document.getElementById('app');
+function h(html){ $app.innerHTML = html; }
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function clone(o){ return JSON.parse(JSON.stringify(o)); }
+var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function apiPost(body){
+  if(DEMO) return demo(body);
+  return fetch(API_URL,{method:'POST',body:JSON.stringify(body)}).then(function(r){return r.text()}).then(JSON.parse);
+}
+function fatal(msg){
+  h('<div class="lock"><div class="lockcard"><div class="banner bad">'+esc(msg)+'</div>'+
+    '<button class="btn wide" onclick="location.reload()">Try again</button></div></div>');
+}
+
+var LOGO = "data:image/png;base64,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";
+
+// session state — in memory only, on purpose
+var SESSION=null, WHO='', CONFIG=null, ORIG=null, DEFAULT_PIN=false;
+
+if(DEMO) $('demobar').style.display='block';
+pinPage();
+
+// live pending-change counter — the header button ticks as you edit
+$app.addEventListener('input', updateCount);
+$app.addEventListener('change', updateCount);
+function updateCount(){
+  var el=$('chgcount'); if(!el||!ORIG) return;
+  try{ pull(); var n=diff().length; }catch(e){ return; }
+  el.textContent=n;
+  el.className='cnt'+(n?'':' zero');
+}
+
+// ===========================================================================
+// PIN GATE — a lock screen, not a form
+// ===========================================================================
+function pinPage(msg){
+  h('<div class="lock"><div class="lockcard">'+
+    '<div class="brand"><img alt="" src="'+LOGO+'"><div><div class="t1">Crest Pharmacies</div><div class="t2">Admin console</div></div></div>'+
+    '<h2>Sign in</h2>'+
+    '<p class="sub">This console sets the pharmacies, validators, emails and settings that every Crest tool reads. Changes take effect for everyone.</p>'+
+    (msg?'<div class="banner bad">'+esc(msg)+'</div>':'')+
+    '<label>Your name</label><input type="text" id="p_who" autocomplete="name">'+
+    '<p class="hint">Recorded against every change you make.</p>'+
+    '<label>Admin PIN</label><input type="password" id="p_pin" inputmode="numeric" autocomplete="off">'+
+    '<button type="button" class="btn wide" id="pinbtn">Sign in</button>'+
+    '</div></div>');
+  $('p_who').value = WHO || '';
+  $('pinbtn').onclick = doAuth;
+  $('p_pin').onkeydown = function(e){ if(e.key==='Enter') doAuth(); };
+}
+function doAuth(){
+  var who=$('p_who').value.trim(), pin=$('p_pin').value.trim();
+  if(!who) return pinPage('Enter your name — every change is logged against it.');
+  if(!pin) return pinPage('Enter the admin PIN.');
+  var btn=$('pinbtn'); btn.disabled=true; btn.textContent='Checking…';
+  apiPost({action:'adminAuth', pin:pin, by:who}).then(function(res){
+    if(!res.ok){
+      if(res.code==='locked') return pinPage(res.message||'Too many wrong PINs. Locked for a while — try later.');
+      return pinPage('That PIN is not right.');
+    }
+    SESSION=res.session; WHO=who; DEFAULT_PIN=!!res.defaultPin;
+    CONFIG=normalise(res.config); ORIG=clone(CONFIG);
+    renderMain();
+  }).catch(function(){ pinPage('No connection — check your signal and try again.'); });
+}
+
+// Fail safe: never render a half-shaped config into an editor that saves it back.
+function normalise(c){
+  c = c || {};
+  c.pharmacies = c.pharmacies || [];
+  c.validators = c.validators || [];
+  c.emails = c.emails || {};
+  c.emails.accounts = c.emails.accounts || '';
+  c.emails.locumHandling = c.emails.locumHandling || '';
+  c.emails.cashAck = c.emails.cashAck || '';
+  c.locum = c.locum || {}; c.cash = c.cash || {};
+  if(c.locum.reminderDays==null) c.locum.reminderDays = 2;
+  if(c.locum.escalateDays==null) c.locum.escalateDays = 4;
+  if(c.cash.threshold==null) c.cash.threshold = 20;
+  return c;
+}
+
+// ===========================================================================
+// APP SHELL
+// ===========================================================================
+function shell(content){
+  return '<div class="shell">'+
+    '<aside class="rail">'+
+      '<div class="brand"><img alt="" src="'+LOGO+'"><div><div class="t1">Crest Pharmacies</div><div class="t2">Admin console</div></div></div>'+
+      '<nav>'+
+        '<a href="#sec-pharm">Pharmacies</a>'+
+        '<a href="#sec-val">Validators</a>'+
+        '<a href="#sec-email">Emails</a>'+
+        '<a href="#sec-locum">Locum claims</a>'+
+        '<a href="#sec-cash">Cash log</a>'+
+        '<a href="#sec-pin">Security</a>'+
+      '</nav>'+
+      '<div class="who">Signed in as <b>'+esc(WHO)+'</b><br>Every save is logged: who, when, what.</div>'+
+    '</aside>'+
+    '<div class="main">'+content+'</div>'+
+    '</div>';
+}
+
+// ===========================================================================
+// MAIN EDITOR
+// ===========================================================================
+function activeValCount(phName){
+  return CONFIG.validators.filter(function(v){return v.pharmacy===phName && v.active;}).length;
+}
+
+function renderMain(errs){
+  var pharmRows = CONFIG.pharmacies.map(function(p,i){
+    var n=activeValCount(p.name);
+    return '<tr>'+
+      '<td class="nm">'+esc(p.name)+(p.active?'':'<span class="tag">Off</span>')+'</td>'+
+      '<td><input type="checkbox" data-phact="'+i+'"'+(p.active?' checked':'')+'></td>'+
+      '<td><span class="cov'+(n?'':' none')+'">'+n+' approver'+(n===1?'':'s')+'</span></td>'+
+      '<td style="text-align:right"><button class="mini" data-rmph="'+i+'">Remove</button></td>'+
+      '</tr>';
+  }).join('');
+
+  var valRows = CONFIG.validators.map(function(v,i){
+    var phOpts = CONFIG.pharmacies.map(function(p){
+      return '<option'+(p.name===v.pharmacy?' selected':'')+'>'+esc(p.name)+'</option>';
+    }).join('');
+    return '<tr>'+
+      '<td><input type="text" data-vname="'+i+'" value="'+esc(v.name)+'" placeholder="Name"></td>'+
+      '<td><input type="email" data-vemail="'+i+'" value="'+esc(v.email)+'" placeholder="email@example.com"></td>'+
+      '<td><select data-vph="'+i+'"><option value="">— select —</option>'+phOpts+'</select></td>'+
+      '<td style="text-align:center"><input type="checkbox" data-vact="'+i+'"'+(v.active?' checked':'')+'></td>'+
+      '<td style="text-align:right"><button class="mini" data-rmval="'+i+'">Remove</button></td>'+
+      '</tr>';
+  }).join('');
+
+  h(shell(
+    '<div class="topbar"><h1>Settings</h1>'+
+    '<button type="button" class="btn" id="reviewbtn">Review changes<span class="cnt zero" id="chgcount">0</span></button></div>'+
+
+    (DEFAULT_PIN?'<div class="warn"><b>The PIN is still the placeholder.</b> Change it in Security before anyone else uses this console.</div>':'')+
+    '<div class="warn">Testing period: every address here is a <b>moukik.cyber+…@gmail.com</b> alias, so all app mail lands in one inbox, pre-labelled. Do not put real company addresses in until go-live.</div>'+
+    (errs&&errs.length?'<div class="err" style="display:block"><b>Cannot save:</b><br>'+errs.map(function(m){return '• '+esc(m)}).join('<br>')+'</div>':'')+
+
+    '<div class="sec" id="sec-pharm">'+
+    '<h2>Pharmacies</h2>'+
+    '<p class="sub">The list staff pick from. Turn one off to hide it from new claims without touching past ones. No renaming — past records point at the name; add a new one and switch the old off.</p>'+
+    '<div class="tblwrap"><table class="t">'+
+    '<tr><th>Pharmacy</th><th>In use</th><th>Approvers</th><th></th></tr>'+pharmRows+
+    '</table></div>'+
+    '<div class="addrow"><input type="text" id="newph" placeholder="New pharmacy name, exactly as staff should see it">'+
+    '<button type="button" class="btn2" id="addph">+ Add pharmacy</button></div>'+
+    '</div>'+
+
+    '<div class="sec" id="sec-val">'+
+    '<h2>Validators</h2>'+
+    '<p class="sub">Who can approve a locum claim, per pharmacy. A pharmacy in use must keep at least one validator switched on.</p>'+
+    '<div class="tblwrap"><table class="t">'+
+    '<tr><th>Name</th><th>Email</th><th>Pharmacy</th><th style="text-align:center">Can approve</th><th></th></tr>'+valRows+
+    '</table></div>'+
+    '<div class="addrow"><button type="button" class="btn2" id="addval">+ Add validator</button></div>'+
+    '</div>'+
+
+    '<div class="sec" id="sec-email">'+
+    '<h2>Emails</h2>'+
+    '<p class="sub">Where each stream of app mail goes.</p>'+
+    '<div class="grid3">'+
+    '<div class="field"><label>Accounts (pays approved claims)</label><input type="email" id="e_acc" value="'+esc(CONFIG.emails.accounts)+'">'+
+    '<p class="hint">Approved claims land here with the bank details. Whoever pays taps Paid.</p></div>'+
+    '<div class="field"><label>Locum queries</label><input type="email" id="e_loc" value="'+esc(CONFIG.emails.locumHandling)+'">'+
+    '<p class="hint">Where a stuck claim escalates to; reply-to on locum emails.</p></div>'+
+    '<div class="field"><label>Cash log acknowledgements</label><input type="email" id="e_cash" value="'+esc(CONFIG.emails.cashAck)+'">'+
+    '<p class="hint">Cash entries at or over the threshold go here.</p></div>'+
+    '</div></div>'+
+
+    '<div class="grid2">'+
+    '<div class="sec" id="sec-locum" style="margin-top:18px">'+
+    '<h2>Locum claims</h2>'+
+    '<p class="sub">Nobody is ever approved automatically. A slow validator gets chased, then escalated.</p>'+
+    '<div class="grid2">'+
+    '<div class="field"><label>Remind validator after</label><input type="number" id="l_rem" min="1" max="30" step="1" value="'+esc(CONFIG.locum.reminderDays)+'">'+
+    '<p class="hint">working days</p></div>'+
+    '<div class="field"><label>Escalate after</label><input type="number" id="l_esc" min="1" max="60" step="1" value="'+esc(CONFIG.locum.escalateDays)+'">'+
+    '<p class="hint">working days, to Locum queries</p></div>'+
+    '</div></div>'+
+    '<div class="sec" id="sec-cash" style="margin-top:18px">'+
+    '<h2>Cash log</h2>'+
+    '<p class="sub">Under the threshold, cash is logged automatically. At or over it, head office must acknowledge.</p>'+
+    '<div class="field" style="max-width:220px"><label>Acknowledgement threshold (£)</label><input type="number" id="c_thr" min="0" step="1" value="'+esc(CONFIG.cash.threshold)+'"></div>'+
+    '</div>'+
+    '</div>'+
+
+    '<div class="sec" id="sec-pin">'+
+    '<h2>Security</h2>'+
+    '<p class="sub">Changes the PIN for this console. Nothing else uses it.</p>'+
+    '<div id="pinmsg"></div>'+
+    '<div class="grid3">'+
+    '<div class="field"><label>New PIN (4–8 digits)</label><input type="password" id="np1" inputmode="numeric" autocomplete="new-password"></div>'+
+    '<div class="field"><label>Confirm new PIN</label><input type="password" id="np2" inputmode="numeric" autocomplete="new-password"></div>'+
+    '<div class="field"><label>&nbsp;</label><button type="button" class="btn2" id="pinsave" style="width:100%;padding:12px">Change PIN</button></div>'+
+    '</div></div>'
+  ));
+
+  bindMain();
+  updateCount();
+  window.scrollTo(0,0);
+}
+
+function bindMain(){
+  // structural edits re-render; field edits just update state
+  document.querySelectorAll('[data-rmph]').forEach(function(b){
+    b.onclick=function(){ pull(); CONFIG.pharmacies.splice(Number(b.dataset.rmph),1); renderMain(); };
+  });
+  document.querySelectorAll('[data-phact]').forEach(function(c){
+    c.onchange=function(){ pull(); CONFIG.pharmacies[Number(c.dataset.phact)].active=c.checked; renderMain(); };
+  });
+  document.querySelectorAll('[data-rmval]').forEach(function(b){
+    b.onclick=function(){ pull(); CONFIG.validators.splice(Number(b.dataset.rmval),1); renderMain(); };
+  });
+  document.querySelectorAll('[data-vact]').forEach(function(c){
+    c.onchange=function(){ pull(); CONFIG.validators[Number(c.dataset.vact)].active=c.checked; renderMain(); };
+  });
+  document.querySelectorAll('[data-vph]').forEach(function(s){
+    s.onchange=function(){ pull(); renderMain(); };
+  });
+  $('addph').onclick=function(){
+    pull();
+    var n=$('newph').value.trim();
+    if(n) CONFIG.pharmacies.push({name:n, active:true});
+    renderMain();
+  };
+  $('newph').onkeydown=function(e){ if(e.key==='Enter') $('addph').click(); };
+  $('addval').onclick=function(){
+    pull();
+    CONFIG.validators.push({pharmacy:(CONFIG.pharmacies[0]||{}).name||'', name:'', email:'', active:true});
+    renderMain();
+  };
+  $('pinsave').onclick=changePin;
+  $('reviewbtn').onclick=function(){ pull(); review(); };
+}
+
+// read every editable field back into CONFIG
+function pull(){
+  document.querySelectorAll('[data-vname]').forEach(function(el){ CONFIG.validators[Number(el.dataset.vname)].name=el.value.trim(); });
+  document.querySelectorAll('[data-vemail]').forEach(function(el){ CONFIG.validators[Number(el.dataset.vemail)].email=el.value.trim(); });
+  document.querySelectorAll('[data-vph]').forEach(function(el){ CONFIG.validators[Number(el.dataset.vph)].pharmacy=el.value; });
+  document.querySelectorAll('[data-vact]').forEach(function(el){ CONFIG.validators[Number(el.dataset.vact)].active=el.checked; });
+  document.querySelectorAll('[data-phact]').forEach(function(el){ CONFIG.pharmacies[Number(el.dataset.phact)].active=el.checked; });
+  if($('e_acc')){
+    CONFIG.emails.accounts=$('e_acc').value.trim();
+    CONFIG.emails.locumHandling=$('e_loc').value.trim();
+    CONFIG.emails.cashAck=$('e_cash').value.trim();
+    CONFIG.locum.reminderDays=Number($('l_rem').value);
+    CONFIG.locum.escalateDays=Number($('l_esc').value);
+    CONFIG.cash.threshold=Number($('c_thr').value);
+  }
+}
+
+// ===========================================================================
+// VALIDATION — the guardrails
+// ===========================================================================
+function validate(){
+  var e=[];
+  var names={};
+  CONFIG.pharmacies.forEach(function(p){
+    if(!p.name) e.push('A pharmacy has no name.');
+    if(names[p.name]) e.push('Two pharmacies are both called "'+p.name+'".');
+    names[p.name]=true;
+  });
+  CONFIG.validators.forEach(function(v){
+    var who = v.name || v.email || 'a validator';
+    if(!v.name) e.push('A validator for '+(v.pharmacy||'no pharmacy')+' has no name.');
+    if(!EMAIL_RE.test(v.email)) e.push(who+': that email address is not valid.');
+    if(!v.pharmacy) e.push(who+' is not linked to a pharmacy.');
+    else if(!CONFIG.pharmacies.some(function(p){return p.name===v.pharmacy;}))
+      e.push(who+' is linked to "'+v.pharmacy+'", which is not in the pharmacy list.');
+  });
+  // the important one: an in-use pharmacy with nobody who can approve
+  CONFIG.pharmacies.filter(function(p){return p.active;}).forEach(function(p){
+    if(!activeValCount(p.name)) e.push(p.name+' is in use but has no validator switched on — claims there could not be approved by anyone.');
+  });
+  ['accounts','locumHandling','cashAck'].forEach(function(k){
+    var lbl={accounts:'Accounts email',locumHandling:'Locum queries email',cashAck:'Cash log acknowledgement email'}[k];
+    if(!EMAIL_RE.test(CONFIG.emails[k])) e.push(lbl+' is not a valid email address.');
+  });
+  if(!(CONFIG.locum.reminderDays>=1)) e.push('Reminder days must be at least 1.');
+  if(!(CONFIG.locum.escalateDays>=1)) e.push('Escalation days must be at least 1.');
+  if(CONFIG.locum.escalateDays<=CONFIG.locum.reminderDays)
+    e.push('Escalation must come after the reminder — set it higher than '+CONFIG.locum.reminderDays+'.');
+  if(!(CONFIG.cash.threshold>=0)) e.push('Cash threshold must be £0 or more.');
+  return e;
+}
+
+// ===========================================================================
+// CHANGE LOG — plain English, shown before saving and stored with the save
+// ===========================================================================
+function vkey(v){ return v.pharmacy+' | '+v.name; }
+function diff(){
+  var out=[];
+  var oP={}, nP={};
+  ORIG.pharmacies.forEach(function(p){ oP[p.name]=p; });
+  CONFIG.pharmacies.forEach(function(p){ nP[p.name]=p; });
+  Object.keys(nP).forEach(function(n){
+    if(!oP[n]) out.push('Added pharmacy "'+n+'"'+(nP[n].active?'':' (off)'));
+    else if(oP[n].active!==nP[n].active) out.push('Pharmacy "'+n+'" turned '+(nP[n].active?'on':'off'));
+  });
+  Object.keys(oP).forEach(function(n){ if(!nP[n]) out.push('Removed pharmacy "'+n+'"'); });
+
+  var oV={}, nV={};
+  ORIG.validators.forEach(function(v){ oV[vkey(v)]=v; });
+  CONFIG.validators.forEach(function(v){ nV[vkey(v)]=v; });
+  Object.keys(nV).forEach(function(k){
+    var n=nV[k], o=oV[k];
+    if(!o){ out.push('Added validator '+n.name+' ('+n.pharmacy+', '+n.email+')'+(n.active?'':' — off')); return; }
+    if(o.email!==n.email) out.push('Validator '+n.name+' ('+n.pharmacy+') email '+o.email+' → '+n.email);
+    if(o.active!==n.active) out.push('Validator '+n.name+' ('+n.pharmacy+') '+(n.active?'switched on':'switched off'));
+  });
+  Object.keys(oV).forEach(function(k){
+    if(!nV[k]) out.push('Removed validator '+oV[k].name+' ('+oV[k].pharmacy+')');
+  });
+
+  [['accounts','Accounts email'],['locumHandling','Locum queries email'],['cashAck','Cash log acknowledgement email']]
+    .forEach(function(p){
+      if(ORIG.emails[p[0]]!==CONFIG.emails[p[0]])
+        out.push(p[1]+' '+(ORIG.emails[p[0]]||'(blank)')+' → '+CONFIG.emails[p[0]]);
+    });
+  if(ORIG.locum.reminderDays!==CONFIG.locum.reminderDays)
+    out.push('Validator reminder '+ORIG.locum.reminderDays+' → '+CONFIG.locum.reminderDays+' working days');
+  if(ORIG.locum.escalateDays!==CONFIG.locum.escalateDays)
+    out.push('Escalation '+ORIG.locum.escalateDays+' → '+CONFIG.locum.escalateDays+' working days');
+  if(ORIG.cash.threshold!==CONFIG.cash.threshold)
+    out.push('Cash threshold £'+ORIG.cash.threshold+' → £'+CONFIG.cash.threshold);
+  return out;
+}
+
+// ===========================================================================
+// CONFIRM + SAVE
+// ===========================================================================
+function review(){
+  var errs=validate();
+  if(errs.length) return renderMain(errs);
+  var changes=diff();
+  if(!changes.length){
+    return renderMain(['Nothing has changed yet.']);
+  }
+  h(shell(
+    '<div class="confirmwrap"><div class="sec">'+
+    '<h2>Confirm changes</h2>'+
+    '<p class="sub">These take effect for every Crest tool as soon as you save. Saved as <b>'+esc(WHO)+'</b>.</p>'+
+    '<ul class="chg">'+changes.map(function(c){return '<li>'+esc(c)+'</li>'}).join('')+'</ul>'+
+    '<div class="err" id="saveerr"></div>'+
+    '<button type="button" class="btn green wide" id="savebtn">Save these '+changes.length+' change'+(changes.length>1?'s':'')+'</button>'+
+    '<button type="button" class="btn2" id="backbtn" style="width:100%;margin-top:12px;padding:13px">Go back and edit</button>'+
+    '</div></div>'
+  ));
+  window.scrollTo(0,0);
+  $('backbtn').onclick=function(){ renderMain(); };
+  $('savebtn').onclick=function(){ save(changes); };
+}
+
+function save(changes){
+  var btn=$('savebtn'); btn.disabled=true; btn.textContent='Saving…';
+  apiPost({action:'adminSave', session:SESSION, by:WHO, config:CONFIG, changes:changes}).then(function(res){
+    if(!res.ok){
+      if(res.code==='session'){ SESSION=null; return pinPage('Your session timed out — sign in again. Nothing was saved.'); }
+      var b=$('saveerr');
+      b.innerHTML='<b>Not saved:</b><br>'+(res.errors||[res.message||'Something went wrong — try again.']).map(function(m){return '• '+esc(m)}).join('<br>');
+      b.style.display='block';
+      btn.disabled=false; btn.textContent='Save these changes';
+      return;
+    }
+    ORIG=clone(CONFIG);
+    h(shell(
+      '<div class="confirmwrap"><div class="sec center">'+
+      '<h2>Saved</h2>'+
+      '<div class="banner good">'+changes.length+' change'+(changes.length>1?'s':'')+' saved. Every tool picks '+(changes.length>1?'them':'it')+' up straight away.</div>'+
+      '<p class="sub" style="margin-top:10px">Recorded against '+esc(WHO)+'.</p>'+
+      '<button class="btn wide" id="donebtn">Back to settings</button></div></div>'
+    ));
+    $('donebtn').onclick=function(){ renderMain(); };
+    window.scrollTo(0,0);
+  }).catch(function(){
+    var b=$('saveerr');
+    b.innerHTML='• No connection — nothing was saved. Check your signal and press Save again.';
+    b.style.display='block';
+    btn.disabled=false; btn.textContent='Save these changes';
+  });
+}
+
+function changePin(){
+  var a=$('np1').value.trim(), b=$('np2').value.trim(), msg=$('pinmsg');
+  function say(cls,t){ msg.innerHTML='<div class="banner '+cls+'">'+esc(t)+'</div>'; }
+  if(!/^\d{4,8}$/.test(a)) return say('bad','The PIN must be 4 to 8 digits.');
+  if(a!==b) return say('bad','The two PINs do not match.');
+  var btn=$('pinsave'); btn.disabled=true; btn.textContent='Changing…';
+  apiPost({action:'adminPin', session:SESSION, by:WHO, newPin:a}).then(function(res){
+    btn.disabled=false; btn.textContent='Change PIN';
+    if(!res.ok){
+      if(res.code==='session'){ SESSION=null; return pinPage('Your session timed out — sign in again.'); }
+      return say('bad', res.message||'Could not change the PIN — try again.');
+    }
+    DEFAULT_PIN=false; $('np1').value=''; $('np2').value='';
+    say('good','PIN changed. Use the new one next time.');
+  }).catch(function(){
+    btn.disabled=false; btn.textContent='Change PIN';
+    say('bad','No connection — the PIN was NOT changed.');
+  });
+}
+
+// ===========================================================================
+// DEMO BACKEND (only runs when API_URL is not configured)
+// Mirrors the real contract so the whole panel is clickable with no server.
+// Config lives in localStorage; PIN is 0000 until changed.
+// Test emails are moukik.cyber+… gmail aliases so every stream lands in one
+// inbox, pre-labelled — no real company addresses until go-live.
+// ===========================================================================
+var DEMO_DEFAULT = {
+  pharmacies:[
+    {name:'Crest — High Street', active:true},
+    {name:'Crest — Riverside', active:true},
+    {name:'Crest — Market Square', active:true},
+    {name:'Crest — Station Road', active:true}
+  ],
+  validators:[
+    {pharmacy:'Crest — High Street', name:'Sam Okafor', email:'moukik.cyber+val.sam@gmail.com', active:true},
+    {pharmacy:'Crest — Riverside', name:'Priya Shah', email:'moukik.cyber+val.priya@gmail.com', active:true},
+    {pharmacy:'Crest — Market Square', name:'Tom Ellis', email:'moukik.cyber+val.tom@gmail.com', active:true},
+    {pharmacy:'Crest — Station Road', name:'Aisha Khan', email:'moukik.cyber+val.aisha@gmail.com', active:true}
+  ],
+  emails:{accounts:'moukik.cyber+accounts@gmail.com', locumHandling:'moukik.cyber+locumdesk@gmail.com', cashAck:'moukik.cyber+cashack@gmail.com'},
+  locum:{reminderDays:2, escalateDays:4},
+  cash:{threshold:20}
+};
+function demoCfg(){
+  try{ var s=localStorage.getItem('crest_config'); if(s) return JSON.parse(s); }catch(e){}
+  return clone(DEMO_DEFAULT);
+}
+function demoSaveCfg(c){ try{ localStorage.setItem('crest_config', JSON.stringify(c)); }catch(e){} }
+function demoPin(){ try{ return localStorage.getItem('crest_pin') || '0000'; }catch(e){ return '0000'; } }
+function demo(p){
+  return new Promise(function(resolve){ setTimeout(function(){ resolve(demoHandle(p)); }, 250); });
+}
+function demoHandle(p){
+  if(p.action==='adminAuth'){
+    if(String(p.pin)!==demoPin()) return {ok:false, code:'badpin'};
+    return {ok:true, session:'demo-session', config:demoCfg(), defaultPin:demoPin()==='0000'};
+  }
+  if(p.action==='adminSave'){
+    if(p.session!=='demo-session') return {ok:false, code:'session'};
+    demoSaveCfg(p.config);
+    try{
+      var log=JSON.parse(localStorage.getItem('crest_config_log')||'[]');
+      p.changes.forEach(function(c){ log.push({at:new Date().toISOString(), by:p.by, change:c}); });
+      localStorage.setItem('crest_config_log', JSON.stringify(log));
+      console.log('%c[DEMO] change log', 'color:#0D47A1;font-weight:bold', log);
+    }catch(e){}
+    return {ok:true, updatedAt:new Date().toISOString()};
+  }
+  if(p.action==='adminPin'){
+    if(p.session!=='demo-session') return {ok:false, code:'session'};
+    try{ localStorage.setItem('crest_pin', String(p.newPin)); }catch(e){}
+    return {ok:true};
+  }
+  return {ok:false, message:'Unknown action'};
+}
+</script>
+</body>
+</html>

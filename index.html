@@ -63,9 +63,16 @@ table.grid th{background:var(--accent-soft);color:var(--navy-ink)}
 .bigref{font-size:26px;font-weight:800;color:var(--navy);letter-spacing:.5px}
 .spin{display:inline-block;width:22px;height:22px;border:3px solid var(--accent-soft);border-top-color:var(--navy);border-radius:50%;animation:sp .8s linear infinite;vertical-align:middle}
 @keyframes sp{to{transform:rotate(360deg)}}
+.demo{background:#082E68;color:#cfe0ff;font-size:12.5px;text-align:center;padding:7px 12px}
 .foot{margin-top:34px;color:#8a93a8;font-size:12.5px;text-align:center}
 details{margin-top:14px}
 summary{cursor:pointer;color:var(--red);font-weight:700;font-size:15px}
+.flagbox{background:#FFF7ED;border:1px solid #FDBA74;border-radius:10px;padding:10px 12px;margin-top:8px}
+.flagbox .flag{margin:0;font-size:14px;line-height:1.5}
+.flagbox .flag + .flag{margin-top:8px}
+.bank{background:#FBFCFF;border:1.5px solid var(--border);border-radius:12px;padding:12px 14px;margin-top:8px}
+.bank .num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:18px;font-weight:700;color:var(--navy-ink);letter-spacing:1px}
+.stamp{background:#DCFCE7;color:#14532D;border-radius:10px;padding:10px 12px;font-size:14px;margin-top:8px}
 </style>
 </head>
 <body>
@@ -73,13 +80,40 @@ summary{cursor:pointer;color:var(--red);font-weight:700;font-size:15px}
   <img id="logo" alt="Crest Pharmacies" src="data:image/png;base64,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">
   <div><div class="t1">Crest Pharmacies</div><div class="t2">Locum Payments</div></div>
 </div>
+<div id="demobar" class="demo" style="display:none">Demo mode — nothing is saved or emailed. Validator and accounts links print to the browser console.</div>
 <div class="wrap">
   <div id="app"><div class="card center"><p><span class="spin"></span></p><p class="hint">Loading…</p></div></div>
   <div class="foot">Crest Pharmacies · Locum Payments · Questions: head office</div>
 </div>
 
 <script>
-var API_URL = '__API_URL__';
+// ===========================================================================
+// Crest Pharmacies — Locum payment claim
+// Locum submits hours/rate/bank details -> the chosen validator approves
+// (an explicit tap, recorded against them) -> accounts pay and tap Paid.
+// Nothing is ever approved automatically: money moving needs a positive,
+// logged action by a named person. A slow validator gets a reminder, then an
+// escalation — never an auto-approval.
+//
+// BACKEND CONTRACT (shared Apps Script; pharmacies/validators/emails/timings
+// all come from the shared config — see BACKEND_SPEC.md):
+//   GET  ?action=meta                 -> {ok, pharmacies:[], validators:{ph:[names]}, months:[{label,maxDay}]}
+//   POST {action:'submit', payload}   -> {ok, ref, total, hours, validator}
+//                                      | {ok:false, errors:[]}   <- incl. self-approval block
+//   GET  ?action=claim&token=..       -> {ok, view:'validator'|'accounts', ...claim}
+//                                      | {ok:false, code:'processed'|'expired'|'invalid'}
+//   POST {action:'approve', token}          -> {ok, ref, status:'APPROVED', locum}
+//   POST {action:'reject',  token, reason}  -> {ok, ref, status:'REJECTED', locum}
+//   POST {action:'paid',    token, by}      -> {ok, ref, status:'PAID', locum}
+//   POST {action:'raise',   token, by, to, reason} -> {ok, ref, status:'RAISED', locum}
+//
+// Two server-side checks raise flags both the validator and accounts see:
+//   - days that overlap a claim already sent in (possible repeat)
+//   - bank details that changed since this locum's last claim
+// Neither blocks the claim; both ask a human to look.
+// ===========================================================================
+var API_URL = 'https://script.google.com/macros/s/AKfycbzo_SG8akvk_7P82WXMGmAuHfeTcU_xZj1nahQSJ8x9h24445oO1NyWIJhwPDvB2kc0/exec';
+var DEMO = API_URL.indexOf('__') === 0;
 
 var $app = document.getElementById('app');
 function h(html){ $app.innerHTML = html; }
@@ -89,10 +123,12 @@ function ordinal(d){ var s=['th','st','nd','rd'],v=d%100; return d+(s[(v-20)%10]
 
 // --- API (plain fetch; no Google cookies cross-origin => no account glitch) ---
 function apiGet(params){
+  if(DEMO) return demo('GET', params);
   var q = Object.keys(params).map(function(k){return k+'='+encodeURIComponent(params[k])}).join('&');
   return fetch(API_URL+'?'+q).then(function(r){return r.text()}).then(JSON.parse);
 }
 function apiPost(body){
+  if(DEMO) return demo('POST', body);
   return fetch(API_URL,{method:'POST',body:JSON.stringify(body)}).then(function(r){return r.text()}).then(JSON.parse);
 }
 function fatal(msg){
@@ -102,9 +138,8 @@ function fatal(msg){
 
 // --- router ---
 var TOKEN = new URLSearchParams(location.search).get('token');
-if (API_URL.indexOf('__')===0){
-  fatal('Setup not finished: the API URL has not been configured yet.');
-} else if (TOKEN){ reviewPage(TOKEN); } else { formPage(); }
+if(DEMO) document.getElementById('demobar').style.display='block';
+if (TOKEN){ claimPage(TOKEN); } else { formPage(); }
 
 // ===========================================================================
 // LOCUM FORM
@@ -295,20 +330,21 @@ function submit(){
 }
 
 // ===========================================================================
-// VALIDATOR REVIEW
+// TOKEN LINK — validator review, or the accounts pay step
 // ===========================================================================
-function reviewPage(token){
+function claimPage(token){
   apiGet({action:'claim',token:token}).then(function(c){
     if(!c.ok){
       if(c.code==='processed') return h('<div class="card"><div class="banner info">Claim <b>'+esc(c.ref)+'</b> was already <b>'+esc(c.status)+'</b>'+(c.decidedAt?' on '+new Date(c.decidedAt).toLocaleString('en-GB'):'')+'.</div><p class="hint">No further action is needed. Nothing has been sent twice.</p></div>');
       if(c.code==='expired') return h('<div class="card"><div class="banner bad">This link has expired.</div><p class="hint">Ask the locum to resubmit, or contact head office.</p></div>');
       return h('<div class="card"><div class="banner bad">This link is not valid.</div><p class="hint">The claim may have been removed. Contact head office if unexpected.</p></div>');
     }
-    renderReview(token,c);
+    if(c.view==='accounts') renderAccounts(token,c); else renderReview(token,c);
   }).catch(function(){ fatal('No connection — check your signal and try again.'); });
 }
 
-function renderReview(token,c,errMsg){
+// shared between the validator view and the accounts view
+function claimSummary(c){
   var monthRows=c.split.rows.map(function(r){
     return '<tr><td>'+esc(r.label)+'</td><td>'+r.daysCount+'</td><td>'+r.hours+'</td><td>£'+money(r.amount)+'</td></tr>';
   }).join('');
@@ -316,13 +352,7 @@ function renderReview(token,c,errMsg){
     var ds=b.days.map(function(d){return d+' ('+b.hours[String(d)]+'h)'}).join(', ');
     return '<p style="margin:4px 0"><b>'+esc(b.label)+':</b> '+esc(ds)+'</p>';
   }).join('');
-  var flags=(c.flags||[]).map(function(f){return '<p class="flag">'+esc(f)+'</p>'}).join('');
-
-  h('<div class="card">'+
-    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
-    '<h2>Locum claim '+esc(c.ref)+'</h2>'+
-    '<p class="sub">Please check every detail. Approving sends this claim to accounts for payment.</p>'+
-    '<table class="kv">'+
+  return '<table class="kv">'+
     '<tr><td>Locum</td><td><b>'+esc(c.locum.name)+'</b><br>'+esc(c.locum.email)+' · '+esc(c.locum.phone)+'</td></tr>'+
     '<tr><td>Role</td><td>'+esc(c.role)+(c.roleOther?' — '+esc(c.roleOther):'')+(c.gphc?'<br>GPhC '+esc(c.gphc):'')+'</td></tr>'+
     '<tr><td>Pharmacy</td><td>'+esc(c.pharmacy)+' ('+esc(c.company)+')</td></tr>'+
@@ -332,8 +362,20 @@ function renderReview(token,c,errMsg){
     '</table>'+
     '<h3>Days & hours claimed</h3>'+daysDetail+
     '<h3>Month split</h3>'+
-    '<table class="grid"><tr><th>Month</th><th>Days</th><th>Hours</th><th>Amount</th></tr>'+monthRows+'</table>'+
-    (flags?'<h3>Check these</h3>'+flags:'')+
+    '<table class="grid"><tr><th>Month</th><th>Days</th><th>Hours</th><th>Amount</th></tr>'+monthRows+'</table>';
+}
+function flagsBlock(c){
+  var flags=(c.flags||[]).map(function(f){return '<p class="flag">'+esc(f)+'</p>'}).join('');
+  return flags?'<h3>Check these before you go on</h3><div class="flagbox">'+flags+'</div>':'';
+}
+
+function renderReview(token,c,errMsg){
+  h('<div class="card">'+
+    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
+    '<h2>Locum claim '+esc(c.ref)+'</h2>'+
+    '<p class="sub">Please check every detail. Approving sends this claim to accounts for payment.</p>'+
+    claimSummary(c)+
+    flagsBlock(c)+
     '<p class="hint" style="margin-top:14px">Bank details are not shown here — accounts receive them after your approval. Nothing is paid until you approve.</p>'+
     '<button class="btn green" id="approvebtn">Approve — send to accounts</button>'+
     '<details><summary>Reject this claim…</summary>'+
@@ -371,6 +413,271 @@ function decide(token,action,reason,c){
     }
     window.scrollTo(0,0);
   }).catch(function(){ renderReview(token,c,'No connection — nothing was changed. Check your signal and try again.'); });
+}
+
+// ===========================================================================
+// ACCOUNTS — PAY, OR SEND IT BACK
+// The gap this closes: before, only the validator had a lever. Accounts could
+// not say "paid" (so locums chased) and could not push back on a claim that
+// was approved but wrong. Now they can do both, and their name is on it.
+// ===========================================================================
+function renderAccounts(token,c,errMsg){
+  var a=c.approval||{};
+  var when=a.at?new Date(a.at).toLocaleString('en-GB'):'';
+  h('<div class="card">'+
+    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
+    '<h2>Pay claim '+esc(c.ref)+'</h2>'+
+    '<p class="sub">Approved and ready to pay. Tap Paid once the money has gone, and the locum is told automatically.</p>'+
+    '<div class="stamp">Approved by <b>'+esc(a.by||'the validator')+'</b>'+(when?' on '+esc(when):'')+'</div>'+
+    claimSummary(c)+
+    flagsBlock(c)+
+    '<h3>Where to send it</h3>'+
+    '<div class="bank">'+
+      '<table class="kv" style="margin:0">'+
+      '<tr><td>Name on account</td><td><b>'+esc(c.bank.name)+'</b></td></tr>'+
+      '<tr><td>Sort code</td><td><span class="num">'+esc(c.bank.sort)+'</span></td></tr>'+
+      '<tr><td>Account number</td><td><span class="num">'+esc(c.bank.acct)+'</span></td></tr>'+
+      '<tr><td>Amount</td><td><b>£'+money(c.split.totalAmount)+'</b></td></tr>'+
+      '<tr><td>Reference</td><td><b>'+esc(c.ref)+'</b></td></tr>'+
+      '</table>'+
+    '</div>'+
+    '<label>Your name</label><input type="text" id="a_by" autocomplete="name">'+
+    '<p class="hint">Recorded against the payment, so we know who sent it.</p>'+
+    '<button class="btn green" id="paidbtn">Paid — money sent</button>'+
+    '<details><summary>Send it back instead…</summary>'+
+    '<label>Send it back to</label>'+
+    '<select id="raiseto">'+
+      '<option value="validator">'+esc(a.by||'The validator')+' — approval looks wrong</option>'+
+      '<option value="locum">'+esc(c.locum.name)+' — the locum needs to fix something</option>'+
+    '</select>'+
+    '<label>Reason (required — they see this)</label>'+
+    '<textarea id="raisereason" rows="3"></textarea>'+
+    '<button class="btn red" id="raisebtn">Send it back</button>'+
+    '</details>'+
+    '</div>');
+
+  var saved=''; try{ saved=localStorage.getItem('crest_accounts_name')||''; }catch(e){}
+  document.getElementById('a_by').value=saved;
+
+  document.getElementById('paidbtn').onclick=function(){
+    var by=document.getElementById('a_by').value.trim();
+    if(!by) return renderAccounts(token,c,'Put your name in before marking it paid — the payment is recorded against it.');
+    try{ localStorage.setItem('crest_accounts_name', by); }catch(e){}
+    settle(token,'paid',{by:by},c);
+  };
+  document.getElementById('raisebtn').onclick=function(){
+    var by=document.getElementById('a_by').value.trim();
+    var reason=document.getElementById('raisereason').value.trim();
+    var to=document.getElementById('raiseto').value;
+    if(!by) return renderAccounts(token,c,'Put your name in before sending it back.');
+    if(!reason) return renderAccounts(token,c,'A reason is required — they need to know what to fix.');
+    try{ localStorage.setItem('crest_accounts_name', by); }catch(e){}
+    settle(token,'raise',{by:by,to:to,reason:reason},c);
+  };
+}
+
+function settle(token,action,extra,c){
+  var pb=document.getElementById('paidbtn'), rb=document.getElementById('raisebtn');
+  if(pb)pb.disabled=true; if(rb)rb.disabled=true;
+  (action==='paid'?pb:rb).textContent='Working…';
+  var body={action:action, token:token};
+  for(var k in extra) body[k]=extra[k];
+  apiPost(body).then(function(res){
+    if(!res.ok){
+      if(res.code==='processed') return h('<div class="card"><div class="banner info">Claim <b>'+esc(res.ref)+'</b> was already <b>'+esc(res.status)+'</b>. Nothing has been sent twice.</div></div>');
+      return renderAccounts(token,c,res.message||'Something went wrong — try again.');
+    }
+    if(res.status==='PAID'){
+      h('<div class="card center"><h2>Paid</h2>'+
+        '<div class="banner good"><b>'+esc(res.ref)+'</b> marked paid by '+esc(extra.by)+'. '+esc(res.locum)+' has been emailed to say the money is on its way.</div>'+
+        '<p class="hint">You can close this page.</p></div>');
+    } else {
+      var who = extra.to==='locum' ? res.locum : (c.approval&&c.approval.by)||'the validator';
+      h('<div class="card center"><h2>Sent back</h2>'+
+        '<div class="banner info"><b>'+esc(res.ref)+'</b> sent back to '+esc(who)+' with your reason. Nothing has been paid.</div>'+
+        '<p class="hint">You will get an email when it comes back to you. You can close this page.</p></div>');
+    }
+    window.scrollTo(0,0);
+  }).catch(function(){ renderAccounts(token,c,'No connection — nothing was changed. Check your signal and try again.'); });
+}
+
+// ===========================================================================
+// DEMO BACKEND (only runs when API_URL is not configured)
+// Clicks through the whole flow with no server. Reads the SAME shared config
+// the admin page writes (localStorage 'crest_config'), so editing validators
+// or emails in admin.html shows up here — that is the real architecture in
+// miniature: admin writes, every tool reads.
+//
+// The flag rules and the self-approval block below are mirrored exactly in
+// BACKEND_SPEC.md. If you change one, change both.
+// ===========================================================================
+var DEMO_CONFIG_FALLBACK = {
+  pharmacies:[
+    {name:'Crest — High Street', active:true},
+    {name:'Crest — Riverside', active:true},
+    {name:'Crest — Market Square', active:true},
+    {name:'Crest — Station Road', active:true}
+  ],
+  validators:[
+    {pharmacy:'Crest — High Street', name:'Sam Okafor', email:'moukik.cyber+val.sam@gmail.com', active:true},
+    {pharmacy:'Crest — Riverside', name:'Priya Shah', email:'moukik.cyber+val.priya@gmail.com', active:true},
+    {pharmacy:'Crest — Market Square', name:'Tom Ellis', email:'moukik.cyber+val.tom@gmail.com', active:true},
+    {pharmacy:'Crest — Station Road', name:'Aisha Khan', email:'moukik.cyber+val.aisha@gmail.com', active:true}
+  ]
+};
+function demoConfig(){
+  try{ var s=localStorage.getItem('crest_config'); if(s) return JSON.parse(s); }catch(e){}
+  return DEMO_CONFIG_FALLBACK;
+}
+function lsGet(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function demo(method, p){
+  return new Promise(function(resolve){ setTimeout(function(){ resolve(demoHandle(method,p)); }, 300); });
+}
+function demoRef(){ return 'CLM-'+Math.random().toString(36).slice(2,7).toUpperCase(); }
+function demoTok(){ return 'demo'+Math.random().toString(36).slice(2,9); }
+function bankKey(b){ return b.sort+'|'+b.acct; }
+
+function demoHandle(method,p){
+  var cfg=demoConfig();
+
+  if(method==='GET' && p.action==='meta'){
+    var vmap={};
+    (cfg.validators||[]).filter(function(v){return v.active;}).forEach(function(v){
+      (vmap[v.pharmacy]=vmap[v.pharmacy]||[]).push(v.name);
+    });
+    var now=new Date(), months=[];
+    for(var i=0;i<3;i++){
+      var d=new Date(now.getFullYear(), now.getMonth()-i, 1);
+      months.push({
+        label: d.toLocaleString('en-GB',{month:'long'})+' '+d.getFullYear(),
+        maxDay: new Date(d.getFullYear(), d.getMonth()+1, 0).getDate()
+      });
+    }
+    return {ok:true,
+      pharmacies:(cfg.pharmacies||[]).filter(function(x){return x.active;}).map(function(x){return x.name;}),
+      validators:vmap, months:months};
+  }
+
+  if(method==='POST' && p.action==='submit'){
+    var pl=p.payload;
+    // --- self-approval block: a locum cannot be their own validator ---
+    var v=(cfg.validators||[]).filter(function(x){
+      return x.pharmacy===pl.pharmacy && x.name===pl.validatorName && x.active; })[0];
+    if(v && v.email && pl.email && v.email.toLowerCase()===pl.email.toLowerCase()){
+      return {ok:false, errors:['The validator you picked uses the same email address as you. Someone else has to approve your claim — pick a different validator, or ask head office.']};
+    }
+    // --- build the month split ---
+    var months=[], rows=[], totalHours=0, totalAmount=0, dayKeys=[];
+    (pl.months||[]).forEach(function(m){
+      var hours={}, days=[], mh=0;
+      m.entries.forEach(function(en){
+        if(!(en.hours>0)) return;
+        days.push(en.day); hours[String(en.day)]=en.hours; mh+=en.hours;
+        dayKeys.push(m.label+'|'+en.day);
+      });
+      if(!days.length) return;
+      days.sort(function(a,b){return a-b;});
+      months.push({label:m.label, days:days, hours:hours});
+      rows.push({label:m.label, daysCount:days.length, hours:mh, amount:mh*pl.rate});
+      totalHours+=mh; totalAmount+=mh*pl.rate;
+    });
+    // --- flags: mirrored in BACKEND_SPEC.md ---
+    var flags=[], hist=lsGet('lc_history')||[];
+    var mine=hist.filter(function(x){ return x.email===(pl.email||'').toLowerCase() && x.status!=='REJECTED'; });
+    var dup={};
+    mine.forEach(function(x){
+      var overlap=(x.days||[]).filter(function(d){ return dayKeys.indexOf(d)>=0; });
+      if(overlap.length) dup[x.ref]=(dup[x.ref]||[]).concat(overlap);
+    });
+    Object.keys(dup).forEach(function(ref){
+      var pretty=dup[ref].map(function(k){ var s=k.split('|'); return s[1]+' '+s[0].split(' ')[0]; }).join(', ');
+      flags.push('Same days as claim '+ref+', already sent in: '+pretty+'. Check this is not a repeat.');
+    });
+    var nk=bankKey({sort:pl.sort, acct:pl.acct});
+    var last=mine.length?mine[mine.length-1]:null;
+    if(last && last.bankKey && last.bankKey!==nk){
+      flags.push('The bank details are different from this locum’s last claim ('+last.ref+'). Ring them on a number you already have to check, before any money is sent — do not just reply to the email.');
+    }
+
+    var ref=demoRef(), token=demoTok();
+    var claim={ref:ref, status:'SUBMITTED', view:'validator',
+      locum:{name:pl.name, email:pl.email, phone:pl.phone},
+      role:pl.role, roleOther:pl.roleOther, gphc:pl.gphc,
+      pharmacy:pl.pharmacy, company:'Crest Pharmacies', validatorName:pl.validatorName,
+      validatorEmail:(v&&v.email)||'', rate:pl.rate, months:months,
+      split:{rows:rows, totalHours:totalHours, totalAmount:totalAmount},
+      bank:{name:pl.bankName, sort:pl.sort, acct:pl.acct},
+      notes:pl.notes, flags:flags, submittedAt:new Date().toISOString()};
+    lsSet('lc_claim_'+ref, claim);
+    lsSet('lc_tok_'+token, {ref:ref, view:'validator'});
+    hist.push({ref:ref, email:(pl.email||'').toLowerCase(), bankKey:nk, days:dayKeys, status:'SUBMITTED'});
+    lsSet('lc_history', hist);
+    console.log('%c[DEMO] Validator link ('+pl.validatorName+'):', 'color:#0D47A1;font-weight:bold',
+      location.pathname+'?token='+token);
+    if(flags.length) console.log('%c[DEMO] flags raised:', 'color:#B45309;font-weight:bold', flags);
+    return {ok:true, ref:ref, total:money(totalAmount), hours:totalHours, validator:pl.validatorName};
+  }
+
+  var t = p.token ? lsGet('lc_tok_'+p.token) : null;
+  var c = t ? lsGet('lc_claim_'+t.ref) : null;
+
+  if(method==='GET' && p.action==='claim'){
+    if(!c) return {ok:false, code:'invalid'};
+    if(t.view==='validator' && c.status!=='SUBMITTED' && c.status!=='RAISED')
+      return {ok:false, code:'processed', ref:c.ref, status:c.status, decidedAt:c.decidedAt};
+    if(t.view==='accounts' && c.status!=='APPROVED')
+      return {ok:false, code:'processed', ref:c.ref, status:c.status, decidedAt:c.decidedAt};
+    var out={}; for(var k in c) out[k]=c[k];
+    out.ok=true; out.view=t.view;
+    if(t.view!=='accounts') delete out.bank;  // validator never sees bank details
+    return out;
+  }
+
+  if(method==='POST' && (p.action==='approve'||p.action==='reject')){
+    if(!c) return {ok:false, code:'invalid'};
+    if(c.status!=='SUBMITTED' && c.status!=='RAISED')
+      return {ok:false, code:'processed', ref:c.ref, status:c.status};
+    c.decidedAt=new Date().toISOString();
+    if(p.action==='reject'){
+      c.status='REJECTED'; c.rejectReason=p.reason;
+      lsSet('lc_claim_'+c.ref, c); demoHistStatus(c.ref,'REJECTED');
+      return {ok:true, ref:c.ref, status:'REJECTED', locum:c.locum.name};
+    }
+    c.status='APPROVED';
+    c.approval={by:c.validatorName, email:c.validatorEmail, at:c.decidedAt};
+    var atok=demoTok();
+    lsSet('lc_claim_'+c.ref, c);
+    lsSet('lc_tok_'+atok, {ref:c.ref, view:'accounts'});
+    demoHistStatus(c.ref,'APPROVED');
+    console.log('%c[DEMO] Accounts link:', 'color:#1E9E5A;font-weight:bold', location.pathname+'?token='+atok);
+    return {ok:true, ref:c.ref, status:'APPROVED', locum:c.locum.name};
+  }
+
+  if(method==='POST' && (p.action==='paid'||p.action==='raise')){
+    if(!c) return {ok:false, code:'invalid'};
+    if(c.status!=='APPROVED') return {ok:false, code:'processed', ref:c.ref, status:c.status};
+    if(p.action==='paid'){
+      c.status='PAID'; c.payment={by:p.by, at:new Date().toISOString()};
+      lsSet('lc_claim_'+c.ref, c); demoHistStatus(c.ref,'PAID');
+      return {ok:true, ref:c.ref, status:'PAID', locum:c.locum.name};
+    }
+    c.status='RAISED'; c.raise={by:p.by, to:p.to, reason:p.reason, at:new Date().toISOString()};
+    lsSet('lc_claim_'+c.ref, c); demoHistStatus(c.ref,'RAISED');
+    if(p.to==='validator'){
+      var vtok=demoTok(); lsSet('lc_tok_'+vtok, {ref:c.ref, view:'validator'});
+      console.log('%c[DEMO] Back to validator:', 'color:#D7382B;font-weight:bold', location.pathname+'?token='+vtok);
+    } else {
+      console.log('%c[DEMO] Locum emailed to fix and resubmit:', 'color:#D7382B;font-weight:bold', c.locum.email, p.reason);
+    }
+    return {ok:true, ref:c.ref, status:'RAISED', locum:c.locum.name};
+  }
+  return {ok:false, message:'Unknown action'};
+}
+function demoHistStatus(ref,status){
+  var hist=lsGet('lc_history')||[];
+  hist.forEach(function(x){ if(x.ref===ref) x.status=status; });
+  lsSet('lc_history', hist);
 }
 </script>
 </body>
