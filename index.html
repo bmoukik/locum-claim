@@ -194,6 +194,13 @@ function renderForm(){
     if(list.length>1){var d=document.createElement('option');d.value='';d.textContent='— select —';v.appendChild(d);}
     list.forEach(function(n){var o=document.createElement('option');o.textContent=n;v.appendChild(o)});
   };
+  // ?ph=<name> (from the printed QR poster) pre-selects the pharmacy —
+  // still changeable if someone scanned the wrong branch's poster
+  var pre=new URLSearchParams(location.search).get('ph');
+  if(pre && META.pharmacies.indexOf(pre)>=0){
+    $('f_pharmacy').value=pre;
+    $('f_pharmacy').onchange.call($('f_pharmacy'));
+  }
   $('f_role').onchange=function(){
     var r=this.value;
     $('gphc_wrap').style.display=(r==='Pharmacist')?'block':'none';
