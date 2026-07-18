@@ -5,8 +5,19 @@ description: Context, conventions, and current status for Crest Pharmacies' sing
 
 # Crest Pharmacies web apps — project context
 
-Last updated: 16 Jul 2026. **See "SESSION HANDOFF — 16 Jul 2026" at the
-bottom for the current live plan, decisions, and the exact next actions.**
+Last updated: 18 Jul 2026. **Phase 1 is LIVE — read "🟢 LIVE STATE" below
+first.** The "SESSION HANDOFF — 16 Jul 2026" section at the bottom is the
+design history + decisions record (still binding on the don't-relitigate
+points), but its build steps are DONE.
+
+**Remaining before real go-live** (testing period until then, personal
+emails only): Gmail labels+filters on moukik.cyber (manual); swap validator
+placeholders for real people via the console; confirm Ridgacre on/off;
+watch the first reminder/escalation fire (weekday 9am trigger); THEN swap
+the three global emails + validator emails to real company addresses, move
+hosting to the final domain, and reprint the QR posters (URL is in the ink).
+Parked (unchanged): stock transfer; bulk-order toolkit (boss first);
+IR35/invoice-trail + GPhC/RTW verification (boss steers).
 
 Crest Pharmacies is a small UK community pharmacy chain: multiple branches in
 the same town(s), all **one company / one legal entity**. This repo holds a
@@ -15,14 +26,60 @@ backed by a Google Apps Script + Google Sheets backend (owned outside this
 repo). The owner (bmoukik) works with a boss who reviews/approves ideas, and
 head office / accounts is a separate department.
 
-## The three apps
+## 🟢 LIVE STATE (17–18 Jul 2026) — read this before touching anything
+
+**Phase 1 is DEPLOYED and tested end-to-end with real emails.** Everything
+below in this box is production fact, not plan.
+
+- **Hosting:** GitHub Pages off `main` — https://bmoukik.github.io/locum-claim/
+  (`index.html`, `cash-log.html`, `posters.html`; `admin.html` there is a DEMO
+  design preview only). Work branch `claude/locum-payments-context-brflyu` is
+  kept merged into main.
+- **Backend:** ONE Apps Script web app (`Code.gs` in this repo = the deployed
+  code; re-paste + bump deployment version to change). Public deployment
+  (Execute as Me / access Anyone):
+  `https://script.google.com/macros/s/AKfycbzo_SG8akvk_7P82WXMGmAuHfeTcU_xZj1nahQSJ8x9h24445oO1NyWIJhwPDvB2kc0/exec`
+  — baked into the three pages (demo mode auto-off). Two spreadsheets on the
+  deploying account: **Crest Config** (Global/Pharmacies/Validators/Tools/
+  ChangeLog) + **Crest Apps Data** (Claims/Cash Log/Tokens). Weekday-9am
+  reminder trigger installed by `setup()`.
+- **Admin console:** SEPARATE deployment of the same script (Execute as: user
+  accessing / access: Anyone with Google account) serving the `Admin` HTML
+  file (`AdminConsole.html` in repo). Three layers: Google sign-in → allowlist
+  (`admin.allowedEmails` on Global tab = bmoukik@gmail.com, moukik.cyber@
+  gmail.com; both share the Config sheet as Editors) → PIN (changed off 0000,
+  rate-limited 5/hr → 30-min lock). Admin actions are NOT in the public
+  doPost — verified refused. Change-log `by` = Google-verified email.
+  Sessions: 2h sliding; unsaved edits survive a re-auth; removing a pharmacy
+  cascades its validators (all three were the "my changes vanished" fixes,
+  18 Jul).
+- **Config content:** the REAL 24-branch estate seeded via `seedEstate()`
+  (23 OCS-map branches + Crook; Adastral excluded — merged into Canford;
+  Ridgacre included, switch off in console if it shouldn't take claims).
+  One random test validator per branch on `moukik.cyber+val.<first>@gmail.com`.
+- **Test emails (Gmail plus-aliasing, ALL streams → moukik.cyber@gmail.com):**
+  validators `+val.<name>`, accounts `+accounts`, escalations `+locumdesk`,
+  cash acks `+cashack`, test locums `+locum.<name>`. Verified live: claim
+  CLM-0B718 submitted through the hosted page → validator + locum emails
+  arrived. Labels exist under "Crest apps/" on bmoukik's Gmail (WRONG account
+  now — recreate labels + 5 to:-filters on moukik.cyber, still manual).
+- **QR posters:** https://bmoukik.github.io/locum-claim/posters.html — 25 A4
+  pages (one per branch + generic). Each QR = `index.html?ph=<branch>` which
+  pre-selects the pharmacy + loads its validators (still changeable). QRs are
+  error-correction Q; regenerate by re-running the segno snippet in git log /
+  session notes if the estate or domain changes. **Domain change ⇒ reprint.**
+
+## The app files
 
 | File | Purpose | Status |
 |---|---|---|
-| `index.html` | **Locum payment claim** — locum submits hours/rate/bank details → chosen validator approves via token link → accounts pays by transfer, or sends it back | **Phase-1 frontend DONE 17 Jul 2026** (accounts step, 2 flags, self-approval block, demo mode added); awaiting backend deploy |
-| `cash-log.html` | **Till outflow log** — manager records any cash leaving the till (locum cash, team lunch, petty supplies, travel, refunds…) | **Phase-1 frontend DONE 17 Jul 2026** (shared config + device-remembers-branch); awaiting backend deploy |
-| `admin.html` | **Admin / control panel** — PIN-gated settings for the whole tool family (pharmacies, validators, emails, per-tool knobs) | **BUILT 17 Jul 2026**, demo mode, verified end-to-end; awaiting backend deploy |
-| `stock-transfer.html` | **Inter-branch emergency stock transfer note** — sender logs what moved, receiving branch taps Received | Frontend complete, demo mode; **ON HOLD** (not in this go-live) |
+| `index.html` | **Locum payment claim** — locum submits hours/rate/bank details → chosen validator approves via token link → accounts taps Paid (emails locum) or sends it back with a reason | **LIVE** (accounts step, duplicate-days + bank-changed flags, self-approval block, `?ph=` QR prefill; demo mode when `__API_URL__`) |
+| `cash-log.html` | **Till outflow log** — manager records any cash leaving the till | **LIVE** (shared config threshold/pharmacies, device remembers branch+name) |
+| `admin.html` | Demo/design preview of the admin console | Demo only — the live console is the private admin deployment |
+| `AdminConsole.html` | The REAL admin console (pasted in Apps Script as HTML file `Admin`) | **LIVE** behind Google sign-in + allowlist + PIN |
+| `Code.gs` | The whole backend (spec: `BACKEND_SPEC.md`) | **DEPLOYED** — repo copy is source of truth, editor is paste target |
+| `posters.html` | Printable QR posters, one per branch | **LIVE** |
+| `stock-transfer.html` | Inter-branch stock transfer note | Frontend complete, demo; **ON HOLD** |
 
 Screenshots of all flows live in `crest/screenshots/` (generated with
 Playwright + the pre-installed Chromium; viewport 460×900, deviceScaleFactor 2,
