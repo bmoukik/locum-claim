@@ -470,6 +470,8 @@ function validate(){
     catNames[c.name]=true;
     if(c.cap!=null && !(c.cap>=0)) e.push('Category "'+c.name+'": the limit must be £0 or more, or blank.');
   });
+  if(!CONFIG.cash.categories.some(function(c){ return /^Locum/.test(c.name); }))
+    e.push('Keep one category starting with "Locum" — the locum payment linkage depends on it.');
   return e;
 }
 

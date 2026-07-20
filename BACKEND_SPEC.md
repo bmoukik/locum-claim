@@ -372,8 +372,12 @@ Otherwise it is `RECORDED` (self-acknowledged, final, still in the ledger).
   who to email when repaid), `emergency`, `wantReview`, `requestRef` (link to
   an approved `CR-`), and for locum entries `claimRef` (link to a `CLM-`) or
   `locumEmail` when there is no claim yet.
-- `POST {action:'ack', token}` / `{action:'query', token, reason}` — unchanged
-  semantics; query emails the manager if an address is on file.
+- `POST {action:'ack', token, by?}` / `{action:'query', token, reason}` —
+  `by` (typed name, stored in `ackBy`) is REQUIRED for any locum-category
+  entry (it pays a person) and for any ack that settles a linked claim; query
+  emails the manager if an address is on file. A typed `claimRef` that does
+  not resolve is a **hard error at log time**, never stored — a typo would
+  orphan the payment (no email to chase, no claim to settle).
 - `POST {action:'cashrepay', token, by}` → `{ok, ref, repaidAt}` — head office
   marks a `pocket` entry repaid. `by` (typed name) required; emails
   `payerEmail` if given. The ack token stays usable for this after
@@ -401,10 +405,16 @@ protection are bypassed at the till.
 - **Claim first (the intended path):** locum submits a claim as normal,
   validator approves as normal. The branch pays cash and logs a locum-category
   entry with `claimRef`. Server checks the claim is APPROVED (flags anything
-  else). When head office **acknowledges** the cash entry, the claim is marked
-  `PAID` with `paidMethod='cash'`, `paidBy` = "<HO name> — cash at <pharmacy>,
-  entry CX-X", and the locum gets the paid email (cash wording). Accounts gets
-  an FYI so they never double-pay by bank.
+  else). When head office **acknowledges** the cash entry (typed name), the
+  claim is marked `PAID` with `paidMethod='cash'`,
+  `cashEntryRef` = the CX ref (structured, machine-readable), `paidBy` =
+  "<HO name> — cash at <pharmacy> (entry CX-X)", and the locum gets the paid
+  email (cash wording). Accounts gets an FYI so they never double-pay by
+  bank. **Amount mismatch = no auto-settle:** if the entry amount differs
+  from the claim total, the ack records the entry only; the claim stays
+  APPROVED with accounts, who see the mismatch flag and decide. Late
+  paperwork: an entry naming a claim already PAID-as-cash back-fills the
+  claim's empty `cashEntryRef`.
 - **Cash first (reality at the counter):** branch pays cash before any claim
   exists, logs the entry with `locumEmail` instead of `claimRef`. The entry is
   flagged (no claim linked). When a claim later arrives from that email, the
@@ -412,7 +422,44 @@ protection are bypassed at the till.
   "A cash payment CX-X (£amt, date) to this locum at <pharmacy> is on the cash
   log — check this claim is not for work already paid in cash." Validator and
   accounts both see it; accounts settles the claim with `method:'cash'`
-  (below) instead of sending a bank transfer.
+  (below) instead of sending a bank transfer. **At that settle, the cash
+  entry's `claimRef` is back-filled** when exactly one unlinked locum entry
+  matches the email — the link then reads both ways from sheet data alone
+  (ambiguous matches stay flag-only for a human to resolve).
+- **Chasing the missing claim (the cron, §9):** a locum-category entry with
+  `locumEmail` and no `claimRef` means a payment whose **worked days/hours are
+  not on record anywhere** — the cash entry deliberately captures only the
+  payment (one date, amount, who); the claim is the sole record of days ×
+  hours × rate and its per-month split. So the weekday trigger chases it on
+  the same cadence as validator chasing: at `locum.reminderDays` the locum is
+  emailed to submit a claim (`claimChasedAt`), at `locum.escalateDays` it
+  escalates to `email.locumHandling` (`claimEscalatedAt`), max one of each.
+  Chasing stops the moment any non-REJECTED claim from that email exists.
+  Worked days/hours are **never** collected on the cash form itself — two
+  competing records would drift, and it would bypass the validator.
+- **P&L rule (for the future pipeline — do not double-count):** the **Claims
+  tab is the locum cost record** — it has the per-month split
+  (`monthsJson`/`totalHours`/`totalAmount`), and a cash-settled claim keeps
+  all of it (`paidMethod='cash'`, `cashEntryRef` = the till entry). A
+  locum-category Cash Log row is a **till movement**, not a second locum
+  expense. Pipeline rules, in order of reliability:
+  1. Filter locum Cash Log rows out of expense ingest **by `category`**
+     (`/^Locum/`) — the admin panels refuse to save a matrix without a
+     Locum-prefixed category precisely so this filter stays sound.
+     `claimRef` alone under-filters (ambiguous back-fills can leave it empty).
+  2. Exclude `status='QUERIED'` rows everywhere — a corrected re-log means two
+     rows for one outflow.
+  3. The one exception: an unlinked locum cash row whose locum **never**
+     submitted a claim is the ONLY record of that cost (single date, no month
+     split — the cron chases exactly this state via
+     `claimChasedAt`/`claimEscalatedAt`). Ingest it as locum cost only when
+     `claimRef` is empty AND no non-REJECTED claim exists for its
+     `locumEmail` — the cron's own condition.
+  4. `paidFrom='pocket'` rows are not till outflows; the reimbursement is
+     recorded on the same row (`repaidBy`/`repaidAt`), no second ledger row.
+  5. Rows predating `migrateCash_` have the appended columns blank —
+     pre-migration PAID claims have no `paidMethod` (all were bank) and
+     pre-migration cash rows can't be claim-joined.
 
 Receipt photos arrive as a base64 data URI. Push them to Drive and store the
 file URL in the sheet; a few hundred base64 images in cells will make the sheet
@@ -499,13 +546,15 @@ raisedReason, raisedAt, remindedAt, escalatedAt`
 reason, fromTill, receiptUrl, notes, person, role, gphc, rtw, ackAt, queryReason`
 — **plus, appended at the end (never reorder existing columns; old rows must
 stay readable):** `paidFrom, payerEmail, emergency, requestRef, claimRef,
-locumEmail, flagsJson, repaidBy, repaidAt`
+locumEmail, flagsJson, repaidBy, repaidAt, claimChasedAt, claimEscalatedAt,
+ackBy`
 
 **Cash Requests** (new tab): `ref, at, status, pharmacy, manager, managerEmail,
 category, estAmount, reason, notes, decidedBy, decidedAt, decideReason, cap,
 linkedCashRef`
 
-Claims — appended at the end: `paidMethod` (`bank` | `cash`).
+Claims — appended at the end: `paidMethod` (`bank` | `cash`), `cashEntryRef`
+(the CX ref that settled it, when known).
 
 Status values — Claims: `SUBMITTED → APPROVED → PAID`, plus `REJECTED` (by
 validator) and `RAISED` (by accounts, returns to `SUBMITTED`-like handling).

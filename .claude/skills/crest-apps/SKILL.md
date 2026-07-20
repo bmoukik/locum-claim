@@ -158,8 +158,19 @@ fullPage). Demo tokens print to the browser console where applicable.
   emailed, accounts warned off the bank transfer. Cash first (reality): entry
   carries the locum's email; any later claim from that email grows a **live
   flag** (computed at view time, both validator + accounts views), and
-  accounts settles it with the "paid in cash at the branch" tick. Locum
-  entries are always reviewed and require claim ref or locum email.
+  accounts settles it with the "paid in cash at the branch" tick — which
+  **back-fills `claimRef` onto the cash entry** when exactly one matches, so
+  the link reads both ways from sheet data alone. Locum entries are always
+  reviewed and require claim ref or locum email. **The worked days/hours live
+  ONLY on the claim** (monthsJson per-month split — the P&L allocation data);
+  the cash form never collects them (two records would drift, and it would
+  bypass the validator). A cash-first entry with no claim is therefore chased
+  by the weekday cron on the locum reminder/escalate cadence (locum nudged →
+  locumHandling escalated, max one each, stops once any live claim from that
+  email exists). **P&L rule:** Claims tab = the locum cost record (month
+  split, `paidMethod` bank/cash); locum-category Cash Log rows are till
+  movements — a future pipeline must never ingest both as locum expense or
+  cash-paid locums double-count.
 - **Stock transfer:** phone/WhatsApp coordination stays exactly as it is —
   the app only records what moved (~20s form) + one-tap receive. No request/
   broadcast/approval workflow, no WhatsApp bot (official API costs per

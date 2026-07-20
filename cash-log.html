@@ -545,14 +545,19 @@ function entryTable(c){
 }
 
 function renderReview(token,c,errMsg){
-  var settles=c.claim&&c.claim.status==='APPROVED';
+  // mirrors Code.gs cashDecide_: settle only on APPROVED claim + matching
+  // amount; ANY payment to a person needs a typed name, settling or not
+  var settles=c.claim&&c.claim.status==='APPROVED'&&c.claim.amountMatches!==false;
+  var mismatch=c.claim&&c.claim.status==='APPROVED'&&c.claim.amountMatches===false;
+  var needsName=settles||isLocumCat(c.category);
   h('<div class="card">'+
     (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
     '<h2>Cash entry '+esc(c.ref)+'</h2>'+
     '<p class="sub">Acknowledging confirms this cash-out is reviewed and recorded'+(settles?' — and marks the linked claim as paid in cash.':'.')+'</p>'+
     entryTable(c)+
-    (settles?'<div class="banner info">Acknowledging will mark claim <b>'+esc(c.claim.ref)+'</b> ('+esc(c.claim.locumName)+', £'+money(c.claim.totalAmount)+') as <b>paid in cash</b>. The locum is emailed, and accounts are told not to pay it by bank.</div>'+
-      '<label>Your name (recorded on the claim)</label><input type="text" id="ackby">':'')+
+    (settles?'<div class="banner info">Acknowledging will mark claim <b>'+esc(c.claim.ref)+'</b> ('+esc(c.claim.locumName)+', £'+money(c.claim.totalAmount)+') as <b>paid in cash</b>. The locum is emailed, and accounts are told not to pay it by bank.</div>':'')+
+    (mismatch?'<div class="warn">£'+money(c.amount)+' does not match claim <b>'+esc(c.claim.ref)+'</b> (£'+money(c.claim.totalAmount)+'). Acknowledging records this entry only — the claim stays with accounts, who see the mismatch.</div>':'')+
+    (needsName?'<label>Your name'+(settles?' (recorded on the claim)':' (this entry pays a person)')+'</label><input type="text" id="ackby">':'')+
     '<button class="btn green" id="ackbtn">Acknowledge</button>'+
     '<details><summary>Query this entry…</summary>'+
     '<label>Reason (the branch sees this)</label>'+
@@ -561,8 +566,8 @@ function renderReview(token,c,errMsg){
     '</details>'+
     '</div>');
   $id('ackbtn').onclick=function(){
-    var by=settles?($id('ackby').value.trim()):'';
-    if(settles&&!by){ renderReview(token,c,'Your name is required — acknowledging this marks claim '+c.claim.ref+' as paid in cash.'); return; }
+    var by=needsName?($id('ackby').value.trim()):'';
+    if(needsName&&!by){ renderReview(token,c,settles?'Your name is required — acknowledging this marks claim '+c.claim.ref+' as paid in cash.':'Your name is required — this entry pays a person.'); return; }
     hoAction(token,{action:'ack',token:token,by:by},c);
   };
   $id('qbtn').onclick=function(){
@@ -765,7 +770,7 @@ function demoHandle(method,p){
     var ref2='CX-'+Math.random().toString(36).slice(2,7).toUpperCase();
     var token2='demo'+Math.random().toString(36).slice(2,9);
     var entry={_kind:'entry', ref:ref2, status:pending?'PENDING':'RECORDED', flags:flags,
-      claim:pl2.claimRef?{ref:pl2.claimRef, status:'APPROVED', locumName:pl2.person||'the locum', totalAmount:pl2.amount}:null,
+      claim:pl2.claimRef?{ref:pl2.claimRef, status:'APPROVED', locumName:pl2.person||'the locum', totalAmount:pl2.amount, amountMatches:true}:null,
       repaidAt:''};
     for(var k in pl2) if(k!=='receipt') entry[k]=pl2[k];
     entry.receipt=pl2.receipt||'';
@@ -793,8 +798,9 @@ function demoHandle(method,p){
     if(!c2||c2._kind!=='entry') return {ok:false, code:'invalid'};
     if(c2.status==='ACKNOWLEDGED'||c2.status==='QUERIED') return {ok:false, code:'processed', ref:c2.ref, status:c2.status};
     if(p.action==='ack'){
-      var settles=c2.claim&&c2.claim.status==='APPROVED';
+      var settles=c2.claim&&c2.claim.status==='APPROVED'&&c2.claim.amountMatches!==false;
       if(settles&&!p.by) return {ok:false, message:'Your name is required — acknowledging this marks claim '+c2.claim.ref+' as paid in cash.'};
+      if(isLocumCat(c2.category)&&!p.by) return {ok:false, message:'Your name is required — this entry pays a person.'};
       c2.status='ACKNOWLEDGED'; c2.decidedAt=new Date().toISOString();
       demoStore(p.token,c2);
       return {ok:true, ref:c2.ref, status:'ACKNOWLEDGED', settledClaim:settles?c2.claim.ref:''};

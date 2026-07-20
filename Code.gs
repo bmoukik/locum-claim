@@ -111,11 +111,12 @@ var CLAIM_COLS = ['ref', 'submittedAt', 'status', 'locumName', 'locumEmail', 'lo
   'raisedBy', 'raisedTo', 'raisedReason', 'raisedAt', 'remindedAt', 'escalatedAt',
   // appended for the cash-settlement linkage — never reorder the columns above,
   // deployed sheets are migrated by appending (migrateCash_)
-  'paidMethod'];
+  'paidMethod', 'cashEntryRef'];
 var CASH_COLS = ['ref', 'at', 'status', 'pharmacy', 'manager', 'category', 'amount', 'date', 'reason', 'fromTill',
   'receiptUrl', 'notes', 'person', 'role', 'gphc', 'rtw', 'ackAt', 'queryReason',
   // appended for the record/request model — same append-only rule as above
-  'paidFrom', 'payerEmail', 'emergency', 'requestRef', 'claimRef', 'locumEmail', 'flagsJson', 'repaidBy', 'repaidAt'];
+  'paidFrom', 'payerEmail', 'emergency', 'requestRef', 'claimRef', 'locumEmail', 'flagsJson', 'repaidBy', 'repaidAt',
+  'claimChasedAt', 'claimEscalatedAt', 'ackBy'];
 var REQ_COLS = ['ref', 'at', 'status', 'pharmacy', 'manager', 'managerEmail', 'category', 'estAmount',
   'reason', 'notes', 'decidedBy', 'decidedAt', 'decideReason', 'cap', 'linkedCashRef'];
 
@@ -439,6 +440,9 @@ function cashFlagsForClaim_(r) {
   var flags = [];
   rows_('Cash Log', CASH_COLS).forEach(function (x) {
     if (!isLocumCat_(x.category) || x.status === 'QUERIED') return;
+    // an entry hard-linked to a DIFFERENT claim is already accounted for —
+    // flagging it on every later claim by the same locum is pure noise
+    if (x.claimRef && String(x.claimRef).toUpperCase() !== String(r.ref).toUpperCase()) return;
     var linked = String(x.claimRef || '').toUpperCase() === String(r.ref).toUpperCase();
     var sameLocum = x.locumEmail && String(x.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase();
     if (linked || sameLocum)
@@ -532,8 +536,24 @@ function settle_(p) {
 
   if (p.action === 'paid') {
     var cash = p.method === 'cash'; // "paid in cash at the branch" — a cash-log entry covered it (spec §6a)
+    var paidByTxt = p.by;
+    if (cash) {
+      // hard-link the till record: exactly one unlinked locum cash entry for
+      // this locum → stamp it with the claim ref AND name it in paidBy, so the
+      // trail reads both ways from sheet data alone (same shape as the
+      // cash-ack path). Ambiguous (0 or 2+) stays flag-only.
+      var cand = rows_('Cash Log', CASH_COLS).filter(function (x) {
+        return isLocumCat_(x.category) && !x.claimRef && x.status !== 'QUERIED' &&
+          String(x.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase();
+      });
+      if (cand.length === 1) {
+        writeCell_('Cash Log', cand[0]._row, CASH_COLS, 'claimRef', r.ref);
+        writeCell_('Claims', r._row, CLAIM_COLS, 'cashEntryRef', cand[0].ref);
+        paidByTxt = p.by + ' — cash at ' + cand[0].pharmacy + ' (entry ' + cand[0].ref + ')';
+      }
+    }
     writeCell_('Claims', r._row, CLAIM_COLS, 'status', 'PAID');
-    writeCell_('Claims', r._row, CLAIM_COLS, 'paidBy', p.by);
+    writeCell_('Claims', r._row, CLAIM_COLS, 'paidBy', paidByTxt);
     writeCell_('Claims', r._row, CLAIM_COLS, 'paidAt', now);
     writeCell_('Claims', r._row, CLAIM_COLS, 'paidMethod', cash ? 'cash' : 'bank');
     if (cash) sendMail_(r.locumEmail, 'Your claim ' + r.ref + ' is settled — paid in cash',
@@ -618,14 +638,15 @@ function cashJudge_(pl, cat, c, req) {
   return { pending: pending, flags: flags };
 }
 
-// Locum-category link checks (spec §6a). Returns {flags, claim} — claim only
-// when the linked ref resolves.
+// Locum-category link checks (spec §6a). Returns {errs, flags, claim} — a
+// claimRef that does not resolve is a hard error, not a flag: storing a typo
+// would orphan the payment (no email to chase, no claim to settle).
 function cashLocumChecks_(pl) {
-  var flags = [], claim = null;
-  if (!isLocumCat_(pl.category)) return { flags: flags, claim: claim };
+  var errs = [], flags = [], claim = null;
+  if (!isLocumCat_(pl.category)) return { errs: errs, flags: flags, claim: claim };
   if (pl.claimRef) {
     claim = findByRef_('Claims', CLAIM_COLS, String(pl.claimRef).trim().toUpperCase());
-    if (!claim) flags.push('Linked claim ' + String(pl.claimRef).trim().toUpperCase() + ' was not found — check the reference.');
+    if (!claim) errs.push('Claim ' + String(pl.claimRef).trim().toUpperCase() + ' was not found — check the reference, or leave it blank and give their email instead.');
     else {
       if (claim.status === 'PAID') flags.push('Claim ' + claim.ref + ' is already marked PAID — this may be a double payment.');
       else if (claim.status !== 'APPROVED') flags.push('Claim ' + claim.ref + ' is ' + claim.status + ' — not yet approved by the validator.');
@@ -637,7 +658,7 @@ function cashLocumChecks_(pl) {
   } else {
     flags.push('No claim linked — ask the locum to submit a claim so validation and duplicate-day checks run.');
   }
-  return { flags: flags, claim: claim };
+  return { errs: errs, flags: flags, claim: claim };
 }
 
 function cashLog_(pl) {
@@ -672,8 +693,9 @@ function cashLog_(pl) {
     if (!req) return { ok: false, errors: ['Approval ' + String(pl.requestRef).trim().toUpperCase() + ' was not found — check the reference.'] };
   }
 
-  var judged = cashJudge_(pl, cat, c, req);
   var loc = cashLocumChecks_(pl);
+  if (loc.errs.length) return { ok: false, errors: loc.errs };
+  var judged = cashJudge_(pl, cat, c, req);
   var flags = judged.flags.concat(loc.flags);
 
   // duplicate-entry tripwire (same pharmacy + category + amount + date)
@@ -709,6 +731,12 @@ function cashLog_(pl) {
   if (req && req.status === 'APPROVED' && !req.linkedCashRef)
     writeCell_('Cash Requests', req._row, REQ_COLS, 'linkedCashRef', ref);
 
+  // late paperwork: the claim was already settled as cash (ambiguous back-fill
+  // skipped it) and the branch now logs the entry naming it — complete the
+  // two-way link
+  if (loc.claim && loc.claim.status === 'PAID' && String(loc.claim.paidMethod) === 'cash' && !loc.claim.cashEntryRef)
+    writeCell_('Claims', loc.claim._row, CLAIM_COLS, 'cashEntryRef', ref);
+
   if (pending) {
     var tok = mintToken_('cash', ref, 'ack');
     sendMail_(c.emails.cashAck, 'Cash entry ' + ref + ' £' + money_(pl.amount) + ' needs your review',
@@ -742,7 +770,8 @@ function cashGet_(tok) {
   entry.flags = JSON.parse(r.flagsJson || '[]');
   if (entry.claimRef) {
     var cl = findByRef_('Claims', CLAIM_COLS, entry.claimRef);
-    if (cl) entry.claim = { ref: cl.ref, status: cl.status, locumName: cl.locumName, totalAmount: Number(cl.totalAmount) }; // never bank
+    if (cl) entry.claim = { ref: cl.ref, status: cl.status, locumName: cl.locumName, totalAmount: Number(cl.totalAmount), // never bank
+      amountMatches: Math.abs(Number(cl.totalAmount) - Number(r.amount)) <= 0.005 };
   }
   if (r.status === 'ACKNOWLEDGED' || r.status === 'QUERIED') {
     // a pocket entry stays actionable after acknowledgment until it is repaid
@@ -763,13 +792,19 @@ function cashDecide_(p) {
 
   if (p.action === 'ack') {
     // acknowledging a claim-linked entry settles the claim — that moves money,
-    // so it needs a typed name (same non-repudiation rule as accounts' Paid)
+    // so it needs a typed name (same non-repudiation rule as accounts' Paid).
+    // Amount mismatch = NO auto-settle: the entry is recorded, the claim stays
+    // with accounts, who see the mismatch flag and decide with full context.
     var claim = r.claimRef ? findByRef_('Claims', CLAIM_COLS, r.claimRef) : null;
-    var settles = claim && claim.status === 'APPROVED';
+    var amountOk = claim && Math.abs(Number(claim.totalAmount) - Number(r.amount)) <= 0.005;
+    var settles = claim && claim.status === 'APPROVED' && amountOk;
     if (settles && !p.by) return { ok: false, message: 'Your name is required — acknowledging this marks claim ' + claim.ref + ' as paid in cash.' };
+    // any payment to a person carries a name, settling or not
+    if (isLocumCat_(r.category) && !p.by) return { ok: false, message: 'Your name is required — this entry pays a person.' };
 
     writeCell_('Cash Log', r._row, CASH_COLS, 'status', 'ACKNOWLEDGED');
     writeCell_('Cash Log', r._row, CASH_COLS, 'ackAt', now);
+    if (p.by) writeCell_('Cash Log', r._row, CASH_COLS, 'ackBy', p.by);
 
     if (settles) {
       var c = readConfig_();
@@ -777,6 +812,7 @@ function cashDecide_(p) {
       writeCell_('Claims', claim._row, CLAIM_COLS, 'paidBy', p.by + ' — cash at ' + r.pharmacy + ' (entry ' + r.ref + ')');
       writeCell_('Claims', claim._row, CLAIM_COLS, 'paidAt', now);
       writeCell_('Claims', claim._row, CLAIM_COLS, 'paidMethod', 'cash');
+      writeCell_('Claims', claim._row, CLAIM_COLS, 'cashEntryRef', r.ref); // machine-readable both ways
       sendMail_(claim.locumEmail, 'Your claim ' + claim.ref + ' was paid in cash',
         '£' + money_(claim.totalAmount) + ' for claim ' + claim.ref + ' was paid to you in cash at ' + r.pharmacy + ' (cash entry ' + r.ref + ').\nNo bank transfer will follow — this settles the claim.');
       sendMail_(c.emails.accounts, 'Claim ' + claim.ref + ' settled in CASH — do not pay by bank',
@@ -1021,6 +1057,9 @@ function adminSave_(p) {
         if (['self', 'review', 'approve'].indexOf(ct.policy) < 0) e.push('Category "' + ct.name + '": policy must be self, review or approve.');
         if (ct.cap != null && ct.cap !== '' && !(Number(ct.cap) >= 0)) e.push('Category "' + ct.name + '": the cap must be 0 or more, or blank.');
       });
+      // the locum linkage, chase cron and P&L filter all key off this prefix
+      if (!cats.some(function (ct) { return isLocumCat_(ct.name); }))
+        e.push('Keep one category starting with "Locum" — the locum payment linkage depends on it.');
     }
   }
   if (e.length) return { ok: false, code: 'validation', errors: e };
@@ -1104,9 +1143,36 @@ function remindAndEscalate() {
       writeCell_('Claims', r._row, CLAIM_COLS, 'remindedAt', new Date().toISOString());
     }
   });
+
+  // Locum paid in cash BEFORE any claim exists: the claim is the only record
+  // of the worked days/hours (the P&L month split), so chase until one is
+  // linked. Same cadence as validator chasing, max one nudge + one escalation.
+  var allClaims = rows_('Claims', CLAIM_COLS);
+  rows_('Cash Log', CASH_COLS).forEach(function (r) {
+    if (!isLocumCat_(r.category) || r.claimRef || !r.locumEmail || r.status === 'QUERIED') return;
+    // if any live claim from this locum exists, the link lands at settle time —
+    // the normal claim chasing covers the rest, don't nag the locum again
+    var submitted = allClaims.some(function (cl) {
+      return String(cl.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase() && cl.status !== 'REJECTED';
+    });
+    if (submitted) return;
+    var d = workingDaysSince_(new Date(r.at));
+    if (d >= c.locum.escalateDays && !r.claimEscalatedAt) {
+      sendMail_(c.emails.locumHandling, 'No claim yet for cash payment ' + r.ref,
+        'Cash entry ' + r.ref + ' (£' + money_(r.amount) + ' to ' + r.person + ' at ' + r.pharmacy + ', ' + r.date + ') still has no claim linked after ' + d + ' working days.\n' +
+        'Until they submit a claim, the worked days and hours behind this payment are not on record. Please chase directly.');
+      writeCell_('Cash Log', r._row, CASH_COLS, 'claimEscalatedAt', new Date().toISOString());
+    } else if (d >= c.locum.reminderDays && !r.claimChasedAt && !r.claimEscalatedAt) {
+      sendMail_(r.locumEmail, 'Please submit a claim for your cash payment at ' + r.pharmacy,
+        'You were paid £' + money_(r.amount) + ' in cash at ' + r.pharmacy + ' on ' + r.date + ' (entry ' + r.ref + ').\n' +
+        'Nothing more is owed — but please submit a payment claim so the days and hours you worked are on record:\n' + webUrl_() + '\n' +
+        'Pick the days you worked and your rate; your validator confirms it as usual.');
+      writeCell_('Cash Log', r._row, CASH_COLS, 'claimChasedAt', new Date().toISOString());
+    }
+  });
 }
 
-// ponytail: Mon–Fri only, no bank-holiday awareness. Add a Holidays tab to
+// Ceiling: Mon–Fri only, no bank-holiday awareness. Add a Holidays tab to
 // config and subtract if a day-early nudge over a bank holiday ever matters.
 function workingDaysSince_(from) {
   var n = 0, d = new Date(from);
