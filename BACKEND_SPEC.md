@@ -98,8 +98,8 @@ old to `active=FALSE`. (The admin page deliberately has no rename button.)
 |---|---|
 | `locum.reminderDays` | `2` |
 | `locum.escalateDays` | `4` |
-| `cash.threshold` | `20` |
-| `cash.categories` | JSON array, optional; page has defaults |
+| `cash.threshold` | `20` — the **global review ceiling**: any spend at/over this gets head-office review regardless of category policy |
+| `cash.categories` | JSON array of `{name, policy, cap}`, optional; pages have defaults. `policy`: `self` (self-acknowledge allowed) \| `review` (head office always sees it) \| `approve` (requires pre-approval before spend). `cap`: number or `null` — for `self`, spends above it force review; for `approve`, the default approved ceiling |
 
 ### Tab `ChangeLog` (append-only)
 
@@ -282,11 +282,20 @@ validator a receipt.
 
 Reason required. Email the locum the reason so they can resubmit.
 
-### `POST {action:'paid', token, by}` → `{ok:true, ref, status:'PAID', locum}`
+### `POST {action:'paid', token, by, method?}` → `{ok:true, ref, status:'PAID', locum}`
 
 `by` is required — the typed name of whoever in accounts sent the money.
-Record `payment = {by, at}`. Email the locum: money sent. This is the thing
-that kills "where's my money?" chasers.
+`method` is `'bank'` (default) or `'cash'` — accounts tick "paid in cash at the
+branch" when a cash-log entry covered it (see §6a; the claim views surface a
+live flag when one exists). Record `payment = {by, at, method}`. Email the
+locum: money sent (bank wording) or paid in cash (cash wording). This is the
+thing that kills "where's my money?" chasers.
+
+**Live cash flag (claim views, computed at view time — not stored):** if the
+Cash Log holds a locum-category entry with this locum's email (or linked
+`claimRef` = this ref), both validator and accounts views get a flag naming the
+entry, amount and pharmacy. Stored flags can't cover this — the cash entry may
+be logged after the claim was submitted.
 
 ### `POST {action:'raise', token, by, to:'validator'|'locum', reason}`
 → `{ok:true, ref, status:'RAISED', locum}`
@@ -301,21 +310,109 @@ is what lets it come back round.
 
 ---
 
-## 6. Cash log actions
+## 6. Cash log actions — records, requests, reimbursement
 
-Unchanged from the built page, with config wired in:
+The flat threshold rule is superseded (owner steer, 13 Jul 2026 + design
+session 20 Jul 2026). Three independent dimensions per entry:
 
-- `GET ?action=cashmeta` → `{ok, pharmacies:[active names], categories:[], ackThreshold}`
-  — `ackThreshold` from `cash.threshold`.
-- `POST {action:'cashlog', payload}` → `{ok, ref, status:'RECORDED'|'PENDING', threshold}`
-  — `ref`: `CX-` + 5 chars. `amount >= threshold` → `PENDING`, mint a token and
-  email `email.cashAck`; otherwise `RECORDED`, no email.
-  Locum-category entries carry `person, role, gphc, rtw` — keep them, they are
-  the compliance record.
-- `GET ?action=cashentry&token=..` → `{ok, entry}` | `{ok:false, code:...}`
-- `POST {action:'ack', token}` → `{ok, ref, status:'ACKNOWLEDGED'}`
-- `POST {action:'query', token, reason}` → `{ok, ref, status:'QUERIED'}` — emails
-  the manager the reason.
+1. **What it is** — a *record* of money already spent (the common case: cash is
+   sorted at the counter before any sign-off could complete), or a *request*
+   for permission before anything is spent.
+2. **Review level** — none (self-acknowledged), head-office acknowledgment
+   after the fact, or head-office approval before the spend. Chosen per entry
+   by the submitter but **floored by the category policy** — the submitter can
+   always escalate, never downgrade below policy.
+3. **Settlement** — where the money came from: `till`, `pocket` (someone paid
+   personally → reimbursement owed), or `invoice` (supplier invoices head
+   office; logged for completeness, no cash moved).
+
+### Review flooring (mirrored in `cash-log.html`)
+
+A record becomes `PENDING` (head-office review) if ANY of:
+- category policy is `review`
+- category policy is `approve` and there is **no valid linked approved request**
+- amount ≥ `cash.threshold` (global ceiling)
+- category `cap` is set and amount > cap
+- `paidFrom = 'pocket'` (someone is owed money — head office must know)
+- `emergency` flag set ("couldn't ask first" — always reviewed, never blocked:
+  reality wins, or people route around the app)
+- submitter voluntarily asked for review (`wantReview`)
+- it is a **locum-category** entry (money to people is always seen)
+
+Otherwise it is `RECORDED` (self-acknowledged, final, still in the ledger).
+
+### Requests (pre-approval)
+
+- `POST {action:'cashrequest', payload}` → `{ok, ref, status:'REQUESTED'}`
+  — `ref`: `CR-` + 5 chars. Payload: `manager, managerEmail (optional),
+  pharmacy, category, amountKnown, estAmount (if known), reason, notes`.
+  Unknown amount is legitimate ("boiler engineer, cost TBC — OK to initiate?").
+  Emails `email.cashAck` a token link.
+- `GET ?action=cashentry&token=..` on a request token → the HO decide view.
+- `POST {action:'cashapprove', token, by, cap}` → `{ok, ref, status:'APPROVED'}`
+  — `by` (typed name) required; `cap` optional ("fine up to £X, ring me
+  beyond"). Emails the manager if `managerEmail` was given.
+- `POST {action:'cashreject', token, by, reason}` → `{ok, ref, status:'REJECTED'}`
+- Requests **lapse 30 days** after approval if never spent against
+  (status `LAPSED`, judged lazily on read). A stale permission must not be
+  reusable months later.
+- `GET ?action=cashreqstatus&refs=CR-A,CR-B` → `{ok, requests:[{ref, status,
+  cap, decidedBy, decidedAt, decideReason}]}` — **safe fields only**. The
+  branch page polls this for the refs the device remembers (localStorage), so
+  branch staff find outcomes on the page they already use — no link-based flow
+  for branch staff (copy rule).
+
+### Records
+
+- `GET ?action=cashmeta` → `{ok, pharmacies:[active names],
+  categories:[{name, policy, cap}], reviewCeiling}`
+- `POST {action:'cashlog', payload}` → `{ok, ref, status:'RECORDED'|'PENDING',
+  flags:[]}` — `ref`: `CX-` + 5 chars. Payload adds to the phase-1 shape:
+  `paidFrom:'till'|'pocket'|'invoice'`, `payerEmail` (pocket only, optional —
+  who to email when repaid), `emergency`, `wantReview`, `requestRef` (link to
+  an approved `CR-`), and for locum entries `claimRef` (link to a `CLM-`) or
+  `locumEmail` when there is no claim yet.
+- `POST {action:'ack', token}` / `{action:'query', token, reason}` — unchanged
+  semantics; query emails the manager if an address is on file.
+- `POST {action:'cashrepay', token, by}` → `{ok, ref, repaidAt}` — head office
+  marks a `pocket` entry repaid. `by` (typed name) required; emails
+  `payerEmail` if given. The ack token stays usable for this after
+  acknowledgment (the entry is not "processed" until any owed money is repaid).
+
+### Flags on records (server-computed, stored in `flagsJson`, shown to HO)
+
+- **Over cap**: linked request has a cap and `amount > cap` beyond £0.01 —
+  "£X against an approval capped at £Y".
+- **Repeat spend on one approval**: a second record links the same `CR-` ref.
+- **Duplicate entry**: same pharmacy + category + amount + date already on the
+  log (non-queried) — "Looks like a repeat of CX-…".
+- **Emergency**: "Spent without asking first — review."
+- **Locum, no claim linked**: "No claim linked — ask the locum to submit a
+  claim so validation and duplicate-day checks run." (see §6a)
+- **Locum claim mismatch**: linked claim not APPROVED, already PAID, amount ≠
+  claim total, or name mismatch.
+
+### 6a. Locum cash ↔ claim linkage (both directions)
+
+**Cash is a settlement method for a claim, not a parallel payment route.**
+Otherwise the validator's non-repudiation trail and the duplicate-days
+protection are bypassed at the till.
+
+- **Claim first (the intended path):** locum submits a claim as normal,
+  validator approves as normal. The branch pays cash and logs a locum-category
+  entry with `claimRef`. Server checks the claim is APPROVED (flags anything
+  else). When head office **acknowledges** the cash entry, the claim is marked
+  `PAID` with `paidMethod='cash'`, `paidBy` = "<HO name> — cash at <pharmacy>,
+  entry CX-X", and the locum gets the paid email (cash wording). Accounts gets
+  an FYI so they never double-pay by bank.
+- **Cash first (reality at the counter):** branch pays cash before any claim
+  exists, logs the entry with `locumEmail` instead of `claimRef`. The entry is
+  flagged (no claim linked). When a claim later arrives from that email, the
+  claim views grow a **live flag** (computed at view time, not stored):
+  "A cash payment CX-X (£amt, date) to this locum at <pharmacy> is on the cash
+  log — check this claim is not for work already paid in cash." Validator and
+  accounts both see it; accounts settles the claim with `method:'cash'`
+  (below) instead of sending a bank transfer.
 
 Receipt photos arrive as a base64 data URI. Push them to Drive and store the
 file URL in the sheet; a few hundred base64 images in cells will make the sheet
@@ -346,7 +443,8 @@ Not needed in phase 1. When a tool on another Google account needs config:
  "pharmacies":["Crest — High Street"],
  "validators":{"Crest — High Street":["Sam Okafor"]},
  "locum":{"reminderDays":2,"escalateDays":4},
- "cash":{"threshold":20}}
+ "cash":{"threshold":20,
+         "categories":[{"name":"Petty supplies","policy":"self","cap":30}]}}
 ```
 
 **Never in this blob: the PIN or its hash, validator emails, the global
@@ -399,10 +497,27 @@ raisedReason, raisedAt, remindedAt, escalatedAt`
 
 **Cash Log**: `ref, at, status, pharmacy, manager, category, amount, date,
 reason, fromTill, receiptUrl, notes, person, role, gphc, rtw, ackAt, queryReason`
+— **plus, appended at the end (never reorder existing columns; old rows must
+stay readable):** `paidFrom, payerEmail, emergency, requestRef, claimRef,
+locumEmail, flagsJson, repaidBy, repaidAt`
+
+**Cash Requests** (new tab): `ref, at, status, pharmacy, manager, managerEmail,
+category, estAmount, reason, notes, decidedBy, decidedAt, decideReason, cap,
+linkedCashRef`
+
+Claims — appended at the end: `paidMethod` (`bank` | `cash`).
 
 Status values — Claims: `SUBMITTED → APPROVED → PAID`, plus `REJECTED` (by
 validator) and `RAISED` (by accounts, returns to `SUBMITTED`-like handling).
-Cash Log: `RECORDED | PENDING → ACKNOWLEDGED | QUERIED`.
+Cash Log: `RECORDED | PENDING → ACKNOWLEDGED | QUERIED` (+ `repaidAt` set once
+a pocket entry is repaid). Cash Requests: `REQUESTED → APPROVED | REJECTED |
+LAPSED`.
+
+**Migration on an already-deployed sheet:** run `migrateCash_()` once from the
+editor — it appends the new header cells to Cash Log and Claims and creates the
+Cash Requests tab. Deploy order matters: **paste + version the new Code.gs
+BEFORE merging the new pages to main**, or the live pages will call actions the
+deployed backend doesn't have.
 
 Bank details sit in the Claims sheet because accounts need them. Keep the
 spreadsheet's sharing tight: this tab is the most sensitive thing in the whole

@@ -15,9 +15,18 @@ function fakeSheet(rows) {
     _rows: rows,
     getDataRange() { return { getValues: () => this._rows }; },
     appendRow(arr) { this._rows.push(arr.slice()); },
+    clearContents() { this._rows.length = 0; },
     getRange(row, col) {
       const rows_ = this._rows;
-      return { setValue(v) { rows_[row - 1][col - 1] = v; } };
+      return {
+        setValue(v) { while (rows_.length < row) rows_.push([]); rows_[row - 1][col - 1] = v; },
+        setValues(vals) {
+          vals.forEach((vr, i) => {
+            while (rows_.length < row + i) rows_.push([]);
+            vr.forEach((v, j) => { rows_[row + i - 1][col + j - 1] = v; });
+          });
+        },
+      };
     },
   };
 }
@@ -53,7 +62,15 @@ function build() {
       ['key', 'value'],
       ['locum.reminderDays', 2],
       ['locum.escalateDays', 4],
-      ['cash.threshold', 20],
+      // ceiling deliberately above the category caps so cap and ceiling
+      // trigger separately in tests
+      ['cash.threshold', 100],
+      ['cash.categories', JSON.stringify([
+        { name: 'Locum / casual staff (cash)', policy: 'review', cap: null },
+        { name: 'Petty supplies', policy: 'self', cap: 30 },
+        { name: 'Repairs / maintenance', policy: 'approve', cap: null },
+        { name: 'Customer cash refund', policy: 'review', cap: null },
+      ])],
     ]),
     ChangeLog: fakeSheet([['at', 'by', 'change']]),
   };
@@ -91,6 +108,7 @@ function build() {
   sandbox._dataSheets = {
     Claims: fakeSheet([sandbox.CLAIM_COLS.slice()]),
     'Cash Log': fakeSheet([sandbox.CASH_COLS.slice()]),
+    'Cash Requests': fakeSheet([sandbox.REQ_COLS.slice()]),
     Tokens: fakeSheet([['token', 'kind', 'ref', 'view', 'createdAt']]),
   };
   return { s: sandbox, sent, props, dataSheets: () => sandbox._dataSheets, cfgSheets };
@@ -290,6 +308,192 @@ function ok(cond, name) {
   ok(JSON.stringify(auth.config).toLowerCase().indexOf('pinhash') === -1, 'session config never contains the pin hash');
   ok(auth.defaultPin === false, 'defaultPin false once pin changed off 0000');
   ok(s.checkSession_(auth.session) && s.checkSession_(auth.session).by === 'Moukik', 'checkSession_ resolves + slides');
+}
+
+// ===========================================================================
+// CASH LOG — records, requests, reimbursement, locum linkage (spec §6/§6a)
+// ===========================================================================
+function baseCash(over) {
+  return Object.assign({
+    manager: 'Test Manager', pharmacy: 'High Street', category: 'Petty supplies',
+    amount: 5, date: '2026-07-20', reason: 'Bin bags', paidFrom: 'till',
+  }, over || {});
+}
+function cashRow(env, ref) { return env.s.findByRef_('Cash Log', env.s.CASH_COLS, ref); }
+function cashToken(env, ref) {
+  const rows = env.dataSheets().Tokens._rows.slice(1);
+  const m = rows.filter((r) => r[2] === ref);
+  return m.length ? m[m.length - 1][0] : null;
+}
+
+// --- meta + config fallback -------------------------------------------------
+{
+  const { s } = build();
+  const meta = s.cashMeta_();
+  ok(meta.reviewCeiling === 100 && meta.categories.length === 4, 'cashMeta_ serves categories + ceiling');
+  ok(s.cashCats_('not json')[0].name === 'Locum / casual staff (cash)', 'cashCats_ falls back to defaults on bad JSON');
+}
+
+// --- review flooring --------------------------------------------------------
+{
+  const env = build(); const { s, sent } = env;
+  const r1 = s.cashLog_(baseCash());
+  ok(r1.ok && r1.status === 'RECORDED' && sent.length === 0, 'routine £5 self-recorded, no email');
+  const r2 = s.cashLog_(baseCash({ amount: 35, reason: 'Ink' }));
+  ok(r2.status === 'PENDING', 'over category cap (£35 > £30) goes to review');
+  const r3 = s.cashLog_(baseCash({ amount: 150, reason: 'Bulk', date: '2026-07-19' }));
+  ok(r3.status === 'PENDING', 'over global ceiling (£150 ≥ £100) goes to review');
+  ok(sent.filter((m) => m.to === 'cash@test.co').length === 2, 'each reviewed entry emails head office');
+  const r4 = s.cashLog_(baseCash({ category: 'Customer cash refund', amount: 3, reason: 'Refund', date: '2026-07-18' }));
+  ok(r4.status === 'PENDING', 'review-policy category always reviewed');
+  const r5 = s.cashLog_(baseCash({ category: 'Repairs / maintenance', amount: 8, reason: 'Hinge', date: '2026-07-17' }));
+  ok(r5.status === 'PENDING' && r5.flags.some((f) => /needs approval before spending/.test(f)),
+    'approve-policy without a linked approval is flagged');
+  const r6 = s.cashLog_(baseCash({ amount: 4, wantReview: true, reason: 'Odd one', date: '2026-07-16' }));
+  ok(r6.status === 'PENDING', 'voluntary escalation always possible');
+  const r7 = s.cashLog_(baseCash({ amount: 4, emergency: true, reason: 'Late night', date: '2026-07-15' }));
+  ok(r7.status === 'PENDING' && r7.flags.some((f) => /emergency/.test(f)), 'emergency spend flagged + reviewed');
+  const r8 = s.cashLog_(baseCash({ amount: 5, reason: 'Bin bags' }));
+  ok(r8.status === 'PENDING' && r8.flags.some((f) => /Looks like a repeat of CX-/.test(f)),
+    'duplicate entry (same pharmacy/category/amount/date) flagged');
+  ok(s.cashLog_(baseCash({ paidFrom: 'wallet' })).ok === false, 'unknown settlement source rejected');
+}
+
+// --- requests: lifecycle, cap, lapse ---------------------------------------
+{
+  const env = build(); const { s, sent } = env;
+  ok(s.cashRequest_({}).ok === false, 'empty request rejected');
+  const rq = s.cashRequest_({ manager: 'Test Manager', managerEmail: 'mgr@test.co', pharmacy: 'High Street',
+    category: 'Repairs / maintenance', amountKnown: false, reason: 'Fridge seal, engineer TBC' });
+  ok(rq.ok && /^CR-/.test(rq.ref) && rq.status === 'REQUESTED', 'unknown-cost request accepted');
+  ok(sent.some((m) => m.to === 'cash@test.co' && /not known yet/.test(m.subject)), 'HO email says cost not known yet');
+
+  const tok = cashToken(env, rq.ref);
+  ok(s.cashGet_(tok).view === 'decide', 'request token opens the decide view');
+  ok(s.cashReqDecide_({ token: tok, action: 'cashapprove', cap: 200 }).ok === false, 'approve without a name refused');
+  sent.length = 0;
+  const ap = s.cashReqDecide_({ token: tok, action: 'cashapprove', by: 'HO Person', cap: 200 });
+  ok(ap.ok && ap.status === 'APPROVED' && ap.cap === 200, 'approved with a £200 cap');
+  ok(sent.some((m) => m.to === 'mgr@test.co' && /up to £200/.test(m.body)), 'manager emailed the cap');
+  ok(s.cashReqDecide_({ token: tok, action: 'cashreject', by: 'X', reason: 'no' }).code === 'processed',
+    'decided request cannot be re-decided');
+
+  // spend against it, over the cap, and again
+  const sp = s.cashLog_(baseCash({ category: 'Repairs / maintenance', amount: 250, reason: 'Engineer', requestRef: rq.ref }));
+  ok(sp.status === 'PENDING' && sp.flags.some((f) => /capped at £200/.test(f)), 'over-cap spend flagged (£250 vs £200)');
+  ok(s.findByRef_('Cash Requests', s.REQ_COLS, rq.ref).linkedCashRef === sp.ref, 'approval linked to the spend');
+  const sp2 = s.cashLog_(baseCash({ category: 'Repairs / maintenance', amount: 20, reason: 'More parts', date: '2026-07-19', requestRef: rq.ref }));
+  ok(sp2.flags.some((f) => /already spent against/.test(f)), 'second spend on one approval flagged');
+
+  // within-cap spend on a fresh approval self-records (approval already gave HO eyes)
+  const rq2 = s.cashRequest_({ manager: 'Test Manager', pharmacy: 'High Street', category: 'Repairs / maintenance',
+    amountKnown: true, estAmount: 40, reason: 'Shelf bracket' });
+  s.cashReqDecide_({ token: cashToken(env, rq2.ref), action: 'cashapprove', by: 'HO Person', cap: 50 });
+  const sp3 = s.cashLog_(baseCash({ category: 'Repairs / maintenance', amount: 40, reason: 'Bracket', date: '2026-07-18', requestRef: rq2.ref }));
+  ok(sp3.status === 'RECORDED' && sp3.flags.length === 0, 'within-cap approved spend self-records');
+
+  // lapse: unused approval older than 30 days dies on read
+  const rq3 = s.cashRequest_({ manager: 'Test Manager', pharmacy: 'High Street', category: 'Repairs / maintenance',
+    amountKnown: true, estAmount: 10, reason: 'Old one' });
+  s.cashReqDecide_({ token: cashToken(env, rq3.ref), action: 'cashapprove', by: 'HO Person' });
+  const q3 = s.findByRef_('Cash Requests', s.REQ_COLS, rq3.ref);
+  s.writeCell_('Cash Requests', q3._row, s.REQ_COLS, 'decidedAt', new Date(Date.now() - 31 * 24 * 3600 * 1000).toISOString());
+  const st = s.cashReqStatus_(rq.ref + ',' + rq3.ref + ',CR-NOPE');
+  ok(st.requests.length === 2, 'cashreqstatus returns only known refs');
+  ok(st.requests.filter((r) => r.ref === rq3.ref)[0].status === 'LAPSED', 'unused 31-day-old approval lapses');
+  ok(!JSON.stringify(st).includes('@'), 'cashreqstatus leaks no email addresses');
+}
+
+// --- reimbursement (pocket → owed → repaid) ---------------------------------
+{
+  const env = build(); const { s, sent } = env;
+  const r = s.cashLog_(baseCash({ paidFrom: 'pocket', payerEmail: 'payer@test.co', amount: 60, reason: 'Emergency taxi' }));
+  ok(r.status === 'PENDING' && r.flags.some((f) => /own pocket/.test(f)), 'pocket spend always reviewed + flagged');
+  const tok = cashToken(env, r.ref);
+  ok(s.cashRepay_({ token: tok, by: 'HO' }).ok === false, 'cannot repay before acknowledging');
+  ok(s.cashDecide_({ token: tok, action: 'ack' }).ok === true, 'plain ack needs no name (no claim linked)');
+  ok(s.cashGet_(tok).view === 'repay', 'acknowledged pocket entry stays open for repayment');
+  ok(s.cashRepay_({ token: tok }).ok === false, 'repay without a name refused');
+  sent.length = 0;
+  const rp = s.cashRepay_({ token: tok, by: 'HO Person' });
+  ok(rp.ok && rp.repaidAt, 'repay lands');
+  ok(sent.some((m) => m.to === 'payer@test.co' && /repaid/.test(m.subject)), 'payer emailed on repayment');
+  ok(s.cashGet_(tok).code === 'processed', 'repaid entry is closed');
+  ok(s.cashRepay_({ token: tok, by: 'HO' }).code === 'processed', 'cannot repay twice');
+}
+
+// --- locum cash ↔ claim linkage (spec §6a) ----------------------------------
+{
+  // claim first: approved claim, cash settles it at ack
+  const env = build(); const { s, sent } = env;
+  const claim = s.submit_(basePl());
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  const r = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 275,
+    person: 'Jane Locum', role: 'Dispenser', rtw: true, claimRef: claim.ref.toLowerCase(), reason: 'Paid in cash' }));
+  ok(r.status === 'PENDING' && r.flags.length === 0, 'clean claim-linked cash entry reviewed with no flags');
+  const view = s.cashGet_(cashToken(env, r.ref));
+  ok(view.entry.claim && view.entry.claim.ref === claim.ref && !('bank' in view.entry.claim),
+    'HO view carries claim summary, never bank details');
+  ok(s.cashDecide_({ token: cashToken(env, r.ref), action: 'ack' }).ok === false, 'settling ack requires a typed name');
+  sent.length = 0;
+  const ack = s.cashDecide_({ token: cashToken(env, r.ref), action: 'ack', by: 'HO Person' });
+  ok(ack.ok && ack.settledClaim === claim.ref, 'ack settles the linked claim');
+  const cl = s.findByRef_('Claims', s.CLAIM_COLS, claim.ref);
+  ok(cl.status === 'PAID' && cl.paidMethod === 'cash' && /HO Person/.test(cl.paidBy), 'claim PAID by cash with who/where recorded');
+  ok(sent.some((m) => m.to === 'jane@test.co' && /paid in cash/.test(m.subject)), 'locum told: paid in cash');
+  ok(sent.some((m) => m.to === 'accounts@test.co' && /do not pay by bank/.test(m.subject)), 'accounts warned off the bank transfer');
+}
+{
+  // mismatches flagged
+  const env = build(); const { s } = env;
+  const claim = s.submit_(basePl());
+  const notApproved = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 275,
+    person: 'Jane Locum', role: 'Dispenser', rtw: true, claimRef: claim.ref, reason: 'cash' }));
+  ok(notApproved.flags.some((f) => /not yet approved/.test(f)), 'unapproved claim link flagged');
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  const wrongAmt = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 200,
+    person: 'Someone Else', role: 'Dispenser', rtw: true, claimRef: claim.ref, reason: 'cash', date: '2026-07-19' }));
+  ok(wrongAmt.flags.some((f) => /does not match claim/.test(f)), 'amount mismatch flagged');
+  ok(wrongAmt.flags.some((f) => /does not match the claim’s locum/.test(f)), 'name mismatch flagged');
+  ok(s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 10, person: 'X', role: 'Driver',
+    rtw: true, claimRef: 'CLM-ZZZZZ', reason: 'cash', date: '2026-07-18' })).flags.some((f) => /not found/.test(f)),
+    'unknown claim ref flagged');
+  ok(s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 10, person: 'X', role: 'Driver',
+    rtw: true, reason: 'cash', date: '2026-07-17' })).ok === false, 'locum entry without claim ref needs the locum email');
+}
+{
+  // cash first: entry logged before any claim exists → later claim is flagged live
+  const env = build(); const { s, sent } = env;
+  const r = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 120,
+    person: 'Jane Locum', role: 'Dispenser', rtw: true, locumEmail: 'JANE@test.co', reason: 'Sat cover cash' }));
+  ok(r.flags.some((f) => /No claim linked/.test(f)), 'cash-first entry flagged: no claim linked');
+  const claim = s.submit_(basePl());
+  const vView = s.claimGet_(tokenFor(env, claim.ref, 'validator'));
+  ok(vView.flags.some((f) => f.indexOf('Cash payment ' + r.ref) === 0), 'later claim shows live cash flag to validator');
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  const aMail = sent.filter((m) => m.to === 'accounts@test.co').pop();
+  ok(aMail.body.indexOf('Cash payment ' + r.ref) >= 0, 'accounts email carries the live cash flag');
+  // accounts settles in cash instead of paying by bank
+  sent.length = 0;
+  const paid = s.settle_({ token: tokenFor(env, claim.ref, 'accounts'), action: 'paid', by: 'Pat', method: 'cash' });
+  ok(paid.ok && paid.status === 'PAID', 'accounts can settle a claim as paid-in-cash');
+  ok(s.findByRef_('Claims', s.CLAIM_COLS, claim.ref).paidMethod === 'cash', 'paidMethod recorded as cash');
+  ok(sent.some((m) => m.to === 'jane@test.co' && /paid in cash/.test(m.body)), 'locum email uses cash wording, no bank last-4');
+}
+
+// --- admin save with the category matrix ------------------------------------
+{
+  const { s } = build();
+  const auth = s.adminAuth_({ pin: '1234', by: 'Moukik' });
+  const cfg = auth.config;
+  cfg.cash.categories = [{ name: 'Petty supplies', policy: 'sometimes', cap: 30 }];
+  ok(s.adminSave_({ session: auth.session, by: 'Moukik', config: cfg, changes: [] }).ok === false,
+    'adminSave_ rejects an unknown policy');
+  cfg.cash.categories = [{ name: 'Petty supplies', policy: 'approve', cap: 30 }, { name: 'Other', policy: 'review', cap: null }];
+  const saved = s.adminSave_({ session: auth.session, by: 'Moukik', config: cfg, changes: ['Cash categories reworked'] });
+  ok(saved.ok === true, 'adminSave_ accepts a valid category matrix');
+  const cats = s.readConfig_().cash.categories;
+  ok(cats.length === 2 && cats[0].policy === 'approve' && cats[1].cap === null, 'saved matrix round-trips through config');
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

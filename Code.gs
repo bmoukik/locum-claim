@@ -56,11 +56,12 @@ function setup() {
     ['Crest — Station Road', 'Aisha Khan', 'moukik.cyber+val.aisha@gmail.com', true]
   ]);
   var t = cfg.insertSheet('Tools');
-  t.getRange(1, 1, 4, 2).setValues([
+  t.getRange(1, 1, 5, 2).setValues([
     ['key', 'value'],
     ['locum.reminderDays', 2],
     ['locum.escalateDays', 4],
-    ['cash.threshold', 20]
+    ['cash.threshold', 20],
+    ['cash.categories', JSON.stringify(DEFAULT_CASH_CATS)]
   ]);
   cfg.insertSheet('ChangeLog').getRange(1, 1, 1, 3).setValues([['at', 'by', 'change']]);
 
@@ -68,6 +69,7 @@ function setup() {
   var c = data.getActiveSheet(); c.setName('Claims');
   c.getRange(1, 1, 1, CLAIM_COLS.length).setValues([CLAIM_COLS]);
   data.insertSheet('Cash Log').getRange(1, 1, 1, CASH_COLS.length).setValues([CASH_COLS]);
+  data.insertSheet('Cash Requests').getRange(1, 1, 1, REQ_COLS.length).setValues([REQ_COLS]);
   data.insertSheet('Tokens').getRange(1, 1, 1, 5).setValues([['token', 'kind', 'ref', 'view', 'createdAt']]);
 
   PROPS.setProperty('CONFIG_SS_ID', cfg.getId());
@@ -79,13 +81,59 @@ function setup() {
   Logger.log('Data sheet:   ' + data.getUrl());
 }
 
+// One-off for an ALREADY-DEPLOYED estate: appends the new columns to Cash Log
+// and Claims (old rows stay readable — columns are append-only), creates the
+// Cash Requests tab, seeds cash.categories. Run from the editor, once.
+function migrateCash_() {
+  var data = SpreadsheetApp.openById(PROPS.getProperty('DATA_SS_ID'));
+  var cash = data.getSheetByName('Cash Log');
+  var have = cash.getRange(1, 1, 1, cash.getLastColumn()).getValues()[0].filter(String).length;
+  if (have < CASH_COLS.length)
+    cash.getRange(1, have + 1, 1, CASH_COLS.length - have).setValues([CASH_COLS.slice(have)]);
+  var claims = data.getSheetByName('Claims');
+  var haveC = claims.getRange(1, 1, 1, claims.getLastColumn()).getValues()[0].filter(String).length;
+  if (haveC < CLAIM_COLS.length)
+    claims.getRange(1, haveC + 1, 1, CLAIM_COLS.length - haveC).setValues([CLAIM_COLS.slice(haveC)]);
+  if (!data.getSheetByName('Cash Requests'))
+    data.insertSheet('Cash Requests').getRange(1, 1, 1, REQ_COLS.length).setValues([REQ_COLS]);
+  var tools = SpreadsheetApp.openById(PROPS.getProperty('CONFIG_SS_ID')).getSheetByName('Tools');
+  var keys = tools.getDataRange().getValues().map(function (r) { return r[0]; });
+  if (keys.indexOf('cash.categories') < 0)
+    tools.appendRow(['cash.categories', JSON.stringify(DEFAULT_CASH_CATS)]);
+  PROPS.deleteProperty('CONFIG_CACHE');
+  Logger.log('Cash migration done.');
+}
+
 var CLAIM_COLS = ['ref', 'submittedAt', 'status', 'locumName', 'locumEmail', 'locumPhone', 'role', 'roleOther', 'gphc', 'rtw',
   'pharmacy', 'validatorName', 'validatorEmail', 'rate', 'monthsJson', 'totalHours', 'totalAmount',
   'bankName', 'sortCode', 'accountNumber', 'notes', 'flagsJson',
   'approvedBy', 'approvedAt', 'rejectReason', 'paidBy', 'paidAt',
-  'raisedBy', 'raisedTo', 'raisedReason', 'raisedAt', 'remindedAt', 'escalatedAt'];
+  'raisedBy', 'raisedTo', 'raisedReason', 'raisedAt', 'remindedAt', 'escalatedAt',
+  // appended for the cash-settlement linkage — never reorder the columns above,
+  // deployed sheets are migrated by appending (migrateCash_)
+  'paidMethod'];
 var CASH_COLS = ['ref', 'at', 'status', 'pharmacy', 'manager', 'category', 'amount', 'date', 'reason', 'fromTill',
-  'receiptUrl', 'notes', 'person', 'role', 'gphc', 'rtw', 'ackAt', 'queryReason'];
+  'receiptUrl', 'notes', 'person', 'role', 'gphc', 'rtw', 'ackAt', 'queryReason',
+  // appended for the record/request model — same append-only rule as above
+  'paidFrom', 'payerEmail', 'emergency', 'requestRef', 'claimRef', 'locumEmail', 'flagsJson', 'repaidBy', 'repaidAt'];
+var REQ_COLS = ['ref', 'at', 'status', 'pharmacy', 'manager', 'managerEmail', 'category', 'estAmount',
+  'reason', 'notes', 'decidedBy', 'decidedAt', 'decideReason', 'cap', 'linkedCashRef'];
+
+// Category policy: 'self' = self-acknowledge allowed (up to cap, if set),
+// 'review' = head office always sees it, 'approve' = needs pre-approval.
+// Config key cash.categories (JSON) overrides; this is the fail-safe default.
+var DEFAULT_CASH_CATS = [
+  { name: 'Locum / casual staff (cash)', policy: 'review', cap: null },
+  { name: 'Staff welfare / team lunch', policy: 'self', cap: 30 },
+  { name: 'Petty supplies', policy: 'self', cap: 30 },
+  { name: 'Emergency stock', policy: 'self', cap: 50 },
+  { name: 'Travel / parking / courier', policy: 'self', cap: 30 },
+  { name: 'Customer cash refund', policy: 'review', cap: null },
+  { name: 'Repairs / maintenance', policy: 'approve', cap: null },
+  { name: 'Postage', policy: 'self', cap: 20 },
+  { name: 'Other', policy: 'review', cap: null }
+];
+function isLocumCat_(c) { return /^Locum/.test(String(c || '')); }
 
 // ---------------------------------------------------------------------------
 // HTTP entry points
@@ -97,6 +145,7 @@ function doGet(e) {
     if (a === 'claim') return out_(claimGet_(e.parameter.token));
     if (a === 'cashmeta') return out_(cashMeta_());
     if (a === 'cashentry') return out_(cashGet_(e.parameter.token));
+    if (a === 'cashreqstatus') return out_(cashReqStatus_(e.parameter.refs));
     if (a === 'config') return out_(publicConfig_());
     // No action = the admin console. Served ONLY usefully from the ADMIN
     // deployment (Execute as: user accessing + Anyone with Google account):
@@ -180,6 +229,9 @@ function doPost(e) {
     if (a === 'paid' || a === 'raise') return out_(settle_(p));
     if (a === 'cashlog') return out_(cashLog_(p.payload));
     if (a === 'ack' || a === 'query') return out_(cashDecide_(p));
+    if (a === 'cashrequest') return out_(cashRequest_(p.payload));
+    if (a === 'cashapprove' || a === 'cashreject') return out_(cashReqDecide_(p));
+    if (a === 'cashrepay') return out_(cashRepay_(p));
     // admin actions are NOT routed here — they exist only behind adminApi()
     // on the Google-authenticated admin deployment.
     return out_({ ok: false, message: 'Unknown action' });
@@ -212,7 +264,10 @@ function readConfig_() {
       pharmacies: ph, validators: vals,
       emails: { accounts: String(g['email.accounts'] || ''), locumHandling: String(g['email.locumHandling'] || ''), cashAck: String(g['email.cashAck'] || '') },
       locum: { reminderDays: Number(tools['locum.reminderDays']) || 2, escalateDays: Number(tools['locum.escalateDays']) || 4 },
-      cash: { threshold: tools['cash.threshold'] == null ? 20 : Number(tools['cash.threshold']) },
+      cash: {
+        threshold: tools['cash.threshold'] == null ? 20 : Number(tools['cash.threshold']),
+        categories: cashCats_(tools['cash.categories'])
+      },
       _pin: { hash: String(g['adminPinHash'] || ''), salt: String(g['adminPinSalt'] || '') },
       _adminEmails: String(g['admin.allowedEmails'] || '').toLowerCase().split(',').map(function (s) { return s.trim(); }).filter(String)
     };
@@ -233,7 +288,8 @@ function publicConfig_() {
   return {
     ok: true,
     pharmacies: c.pharmacies.filter(function (p) { return p.active; }).map(function (p) { return p.name; }),
-    validators: vmap, locum: c.locum, cash: { threshold: c.cash.threshold }
+    validators: vmap, locum: c.locum,
+    cash: { threshold: c.cash.threshold, categories: c.cash.categories }
   };
 }
 
@@ -376,6 +432,22 @@ function submit_(pl) {
   return { ok: true, ref: ref, total: money_(totalAmount), hours: totalHours, validator: v.name };
 }
 
+// Live cash flags (spec §6a): computed at view time, never stored — the cash
+// entry may be logged after the claim was submitted, so stored flags can't
+// cover it. Shown to validator AND accounts.
+function cashFlagsForClaim_(r) {
+  var flags = [];
+  rows_('Cash Log', CASH_COLS).forEach(function (x) {
+    if (!isLocumCat_(x.category) || x.status === 'QUERIED') return;
+    var linked = String(x.claimRef || '').toUpperCase() === String(r.ref).toUpperCase();
+    var sameLocum = x.locumEmail && String(x.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase();
+    if (linked || sameLocum)
+      flags.push('Cash payment ' + x.ref + ' (£' + money_(x.amount) + ', ' + x.date + ') to this locum at ' + x.pharmacy +
+        ' is on the cash log — check this claim is not for work already paid in cash.');
+  });
+  return flags;
+}
+
 function claimView_(r, view) {
   var months = JSON.parse(r.monthsJson || '[]');
   var rows = months.map(function (m) {
@@ -389,7 +461,7 @@ function claimView_(r, view) {
     pharmacy: r.pharmacy, company: COMPANY, validatorName: r.validatorName,
     rate: Number(r.rate), months: months,
     split: { rows: rows, totalHours: Number(r.totalHours), totalAmount: Number(r.totalAmount) },
-    flags: JSON.parse(r.flagsJson || '[]'), notes: r.notes
+    flags: JSON.parse(r.flagsJson || '[]').concat(cashFlagsForClaim_(r)), notes: r.notes
   };
   if (r.approvedBy) o.approval = { by: r.approvedBy, at: r.approvedAt };
   if (view === 'accounts') o.bank = { name: r.bankName, sort: String(r.sortCode), acct: String(r.accountNumber) }; // validator NEVER gets bank
@@ -436,7 +508,7 @@ function decide_(p) {
   writeCell_('Claims', r._row, CLAIM_COLS, 'approvedBy', r.validatorName);
   writeCell_('Claims', r._row, CLAIM_COLS, 'approvedAt', now);
   var atok = mintToken_('claim', r.ref, 'accounts');
-  var flags = JSON.parse(r.flagsJson || '[]');
+  var flags = JSON.parse(r.flagsJson || '[]').concat(cashFlagsForClaim_(r));
   sendMail_(c.emails.accounts, 'Locum claim ' + r.ref + ' approved — ready to pay £' + money_(r.totalAmount),
     'Claim ' + r.ref + ' was approved by ' + r.validatorName + '.\n\n' +
     'Pay £' + money_(r.totalAmount) + ' to ' + r.bankName + ', sort ' + r.sortCode + ', account ' + r.accountNumber + ', reference ' + r.ref + '.\n' +
@@ -459,10 +531,14 @@ function settle_(p) {
   var now = new Date().toISOString();
 
   if (p.action === 'paid') {
+    var cash = p.method === 'cash'; // "paid in cash at the branch" — a cash-log entry covered it (spec §6a)
     writeCell_('Claims', r._row, CLAIM_COLS, 'status', 'PAID');
     writeCell_('Claims', r._row, CLAIM_COLS, 'paidBy', p.by);
     writeCell_('Claims', r._row, CLAIM_COLS, 'paidAt', now);
-    sendMail_(r.locumEmail, 'Your payment for claim ' + r.ref + ' is on its way',
+    writeCell_('Claims', r._row, CLAIM_COLS, 'paidMethod', cash ? 'cash' : 'bank');
+    if (cash) sendMail_(r.locumEmail, 'Your claim ' + r.ref + ' is settled — paid in cash',
+      'Claim ' + r.ref + ' (£' + money_(r.totalAmount) + ') is marked settled: you were paid in cash at the pharmacy.\nNo bank transfer will follow — this closes the claim.');
+    else sendMail_(r.locumEmail, 'Your payment for claim ' + r.ref + ' is on its way',
       '£' + money_(r.totalAmount) + ' for claim ' + r.ref + ' has been sent to your account ending ' + String(r.accountNumber).slice(-4) + '.\nBank transfers usually arrive the same day.');
     return { ok: true, ref: r.ref, status: 'PAID', locum: r.locumName };
   }
@@ -485,23 +561,130 @@ function settle_(p) {
 }
 
 // ---------------------------------------------------------------------------
-// CASH LOG
+// CASH LOG — records, requests, reimbursement (spec §6)
+// Three independent dimensions: record vs request · review level (floored by
+// category policy, submitter can escalate but never downgrade) · settlement
+// (till / pocket / invoice). The review-flooring rules are MIRRORED in
+// cash-log.html's demo backend; change both or they drift.
 // ---------------------------------------------------------------------------
+function cashCats_(raw) {
+  try {
+    var arr = JSON.parse(raw || '');
+    if (Object.prototype.toString.call(arr) !== '[object Array]' || !arr.length) throw 0;
+    return arr.map(function (c) {
+      return {
+        name: String(c.name || ''),
+        policy: (c.policy === 'review' || c.policy === 'approve') ? c.policy : 'self',
+        cap: (c.cap == null || c.cap === '') ? null : Number(c.cap)
+      };
+    }).filter(function (c) { return c.name; });
+  } catch (e) { return DEFAULT_CASH_CATS; }
+}
+
 function cashMeta_() {
   var c = readConfig_();
   return {
-    ok: true, ackThreshold: c.cash.threshold,
+    ok: true,
+    reviewCeiling: c.cash.threshold, ackThreshold: c.cash.threshold, // ackThreshold kept for old cached pages
     pharmacies: c.pharmacies.filter(function (p) { return p.active; }).map(function (p) { return p.name; }),
-    categories: []
+    categories: c.cash.categories
   };
+}
+
+// Review flooring (mirrored in cash-log.html). Returns {pending, flags}.
+function cashJudge_(pl, cat, c, req) {
+  var flags = [], pending = false;
+  function need(f) { pending = true; if (f) flags.push(f); }
+
+  if (cat.policy === 'review') pending = true;
+  if (isLocumCat_(pl.category)) pending = true;           // money to people is always seen
+  if (pl.wantReview) pending = true;
+  if (pl.amount >= c.cash.threshold) pending = true;      // global ceiling
+  if (cat.policy === 'self' && cat.cap != null && pl.amount > cat.cap) pending = true;
+  if (pl.paidFrom === 'pocket') need('Paid from someone’s own pocket — reimbursement owed (mark repaid below once settled).');
+  if (pl.emergency) need('Spent without asking first (emergency) — review.');
+
+  if (cat.policy === 'approve') {
+    if (!req) need('This category needs approval before spending — no approval is linked. Treat as an emergency spend and review.');
+  }
+  if (req) {
+    if (req.status !== 'APPROVED') need('Linked approval ' + req.ref + ' is ' + req.status + ', not APPROVED.');
+    else {
+      if (req.linkedCashRef) need('Approval ' + req.ref + ' was already spent against (entry ' + req.linkedCashRef + ') — second spend on one approval.');
+      var cap = req.cap === '' || req.cap == null ? null : Number(req.cap);
+      if (cap != null && pl.amount > cap + 0.005) need('£' + money_(pl.amount) + ' against an approval capped at £' + money_(cap) + '.');
+    }
+  }
+  return { pending: pending, flags: flags };
+}
+
+// Locum-category link checks (spec §6a). Returns {flags, claim} — claim only
+// when the linked ref resolves.
+function cashLocumChecks_(pl) {
+  var flags = [], claim = null;
+  if (!isLocumCat_(pl.category)) return { flags: flags, claim: claim };
+  if (pl.claimRef) {
+    claim = findByRef_('Claims', CLAIM_COLS, String(pl.claimRef).trim().toUpperCase());
+    if (!claim) flags.push('Linked claim ' + String(pl.claimRef).trim().toUpperCase() + ' was not found — check the reference.');
+    else {
+      if (claim.status === 'PAID') flags.push('Claim ' + claim.ref + ' is already marked PAID — this may be a double payment.');
+      else if (claim.status !== 'APPROVED') flags.push('Claim ' + claim.ref + ' is ' + claim.status + ' — not yet approved by the validator.');
+      if (Math.abs(Number(claim.totalAmount) - pl.amount) > 0.005)
+        flags.push('Amount £' + money_(pl.amount) + ' does not match claim ' + claim.ref + ' total £' + money_(claim.totalAmount) + '.');
+      if (pl.person && String(claim.locumName).toLowerCase().trim() !== String(pl.person).toLowerCase().trim())
+        flags.push('Paid-to name "' + pl.person + '" does not match the claim’s locum "' + claim.locumName + '".');
+    }
+  } else {
+    flags.push('No claim linked — ask the locum to submit a claim so validation and duplicate-day checks run.');
+  }
+  return { flags: flags, claim: claim };
 }
 
 function cashLog_(pl) {
   var c = readConfig_();
-  if (!pl.manager || !pl.pharmacy || !pl.category || !(pl.amount > 0) || !pl.date || !pl.reason)
-    return { ok: false, errors: ['Missing required fields'] };
+  var errs = [];
+  if (!pl.manager) errs.push('Your name');
+  if (!pl.pharmacy) errs.push('Pharmacy');
+  if (!pl.category) errs.push('What it was for');
+  if (!(pl.amount > 0)) errs.push('Amount (£)');
+  if (!pl.date) errs.push('Date');
+  if (!pl.reason) errs.push('Reason / details');
+  if (['till', 'pocket', 'invoice'].indexOf(pl.paidFrom) < 0) errs.push('Where the money came from');
+  if (isLocumCat_(pl.category)) {
+    if (!pl.person) errs.push('Who was paid');
+    if (!pl.role) errs.push('Role');
+    if (pl.role === 'Pharmacist' && !/^\d{7}$/.test(pl.gphc || '')) errs.push('GPhC number (7 digits)');
+    if (!pl.rtw) errs.push('Right-to-work confirmation');
+    if (!pl.claimRef && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pl.locumEmail || ''))
+      errs.push('The locum’s email (needed to match a claim later) — or link their claim reference');
+  }
+  if (pl.paidFrom === 'pocket' && pl.payerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pl.payerEmail))
+    errs.push('A valid email for the person owed (or leave it blank)');
+  if (errs.length) return { ok: false, errors: errs };
+
+  var cat = null;
+  c.cash.categories.forEach(function (x) { if (x.name === pl.category) cat = x; });
+  if (!cat) return { ok: false, errors: ['That category is not available any more — reload and pick again.'] };
+
+  var req = null;
+  if (pl.requestRef) {
+    req = findByRef_('Cash Requests', REQ_COLS, String(pl.requestRef).trim().toUpperCase());
+    if (!req) return { ok: false, errors: ['Approval ' + String(pl.requestRef).trim().toUpperCase() + ' was not found — check the reference.'] };
+  }
+
+  var judged = cashJudge_(pl, cat, c, req);
+  var loc = cashLocumChecks_(pl);
+  var flags = judged.flags.concat(loc.flags);
+
+  // duplicate-entry tripwire (same pharmacy + category + amount + date)
+  rows_('Cash Log', CASH_COLS).forEach(function (r) {
+    if (r.status !== 'QUERIED' && r.pharmacy === pl.pharmacy && r.category === pl.category &&
+        Number(r.amount) === Number(pl.amount) && String(r.date) === String(pl.date))
+      flags.push('Looks like a repeat of ' + r.ref + ' (same pharmacy, category, amount and date). Check this is not logged twice.');
+  });
+
+  var pending = judged.pending || flags.length > 0;
   var ref = 'CX-' + Utilities.getUuid().replace(/-/g, '').slice(0, 5).toUpperCase();
-  var pending = pl.amount >= c.cash.threshold;
   var receiptUrl = '';
   if (pl.receipt && pl.receipt.indexOf('data:') === 0) {
     try {
@@ -514,50 +697,203 @@ function cashLog_(pl) {
   CASH_COLS.forEach(function (k) { row[k] = ''; });
   row.ref = ref; row.at = new Date().toISOString(); row.status = pending ? 'PENDING' : 'RECORDED';
   row.pharmacy = pl.pharmacy; row.manager = pl.manager; row.category = pl.category;
-  row.amount = pl.amount; row.date = pl.date; row.reason = pl.reason; row.fromTill = !!pl.fromTill;
-  row.receiptUrl = receiptUrl; row.notes = pl.notes || '';
+  row.amount = pl.amount; row.date = pl.date; row.reason = pl.reason;
+  row.fromTill = pl.paidFrom === 'till'; row.paidFrom = pl.paidFrom;
+  row.payerEmail = pl.payerEmail || ''; row.emergency = !!pl.emergency;
+  row.requestRef = req ? req.ref : ''; row.claimRef = loc.claim ? loc.claim.ref : (pl.claimRef ? String(pl.claimRef).trim().toUpperCase() : '');
+  row.locumEmail = (pl.locumEmail || (loc.claim ? loc.claim.locumEmail : '') || '').toLowerCase();
+  row.receiptUrl = receiptUrl; row.notes = pl.notes || ''; row.flagsJson = JSON.stringify(flags);
   row.person = pl.person || ''; row.role = pl.role || ''; row.gphc = pl.gphc || ''; row.rtw = !!pl.rtw;
   sheet_('Cash Log').appendRow(CASH_COLS.map(function (k) { return row[k]; }));
 
+  if (req && req.status === 'APPROVED' && !req.linkedCashRef)
+    writeCell_('Cash Requests', req._row, REQ_COLS, 'linkedCashRef', ref);
+
   if (pending) {
     var tok = mintToken_('cash', ref, 'ack');
-    sendMail_(c.emails.cashAck, 'Cash entry ' + ref + ' £' + money_(pl.amount) + ' needs acknowledgement',
-      pl.manager + ' at ' + pl.pharmacy + ' logged £' + money_(pl.amount) + ' from the till: ' + pl.category + ' — "' + pl.reason + '".\n' +
-      'This is at or over the £' + c.cash.threshold + ' threshold, so it needs your acknowledgement:\n' +
-      cashUrl_() + '?token=' + tok);
+    sendMail_(c.emails.cashAck, 'Cash entry ' + ref + ' £' + money_(pl.amount) + ' needs your review',
+      pl.manager + ' at ' + pl.pharmacy + ' logged £' + money_(pl.amount) + ': ' + pl.category + ' — "' + pl.reason + '".\n' +
+      'Paid from: ' + (pl.paidFrom === 'till' ? 'the till' : pl.paidFrom === 'pocket' ? 'their own pocket (reimbursement owed)' : 'supplier invoice to head office') + '.\n' +
+      (flags.length ? '\nCheck these:\n- ' + flags.join('\n- ') + '\n' : '') +
+      '\nReview it:\n' + cashUrl_() + '?token=' + tok);
   }
-  return { ok: true, ref: ref, status: pending ? 'PENDING' : 'RECORDED', threshold: c.cash.threshold };
+  return { ok: true, ref: ref, status: pending ? 'PENDING' : 'RECORDED', flags: flags };
 }
 
 function cashGet_(tok) {
   var t = lookupToken_(tok);
   if (!t) return { ok: false, code: 'invalid' };
   if (t.expired) return { ok: false, code: 'expired' };
+
+  if (t.kind === 'cashreq') {
+    var q = findByRef_('Cash Requests', REQ_COLS, t.ref);
+    if (!q) return { ok: false, code: 'invalid' };
+    if (q.status !== 'REQUESTED') return { ok: false, code: 'processed', ref: q.ref, status: q.status, decidedAt: q.decidedAt };
+    var reqOut = {};
+    REQ_COLS.forEach(function (k) { reqOut[k] = q[k]; });
+    return { ok: true, view: 'decide', request: reqOut };
+  }
+
   var r = findByRef_('Cash Log', CASH_COLS, t.ref);
   if (!r) return { ok: false, code: 'invalid' };
-  if (r.status === 'ACKNOWLEDGED' || r.status === 'QUERIED') return { ok: false, code: 'processed', ref: r.ref, status: r.status, decidedAt: r.ackAt };
   var entry = {};
   CASH_COLS.forEach(function (k) { entry[k] = r[k]; });
   entry.receipt = r.receiptUrl; // page shows img or link
-  return { ok: true, entry: entry };
+  entry.flags = JSON.parse(r.flagsJson || '[]');
+  if (entry.claimRef) {
+    var cl = findByRef_('Claims', CLAIM_COLS, entry.claimRef);
+    if (cl) entry.claim = { ref: cl.ref, status: cl.status, locumName: cl.locumName, totalAmount: Number(cl.totalAmount) }; // never bank
+  }
+  if (r.status === 'ACKNOWLEDGED' || r.status === 'QUERIED') {
+    // a pocket entry stays actionable after acknowledgment until it is repaid
+    if (r.status === 'ACKNOWLEDGED' && r.paidFrom === 'pocket' && !r.repaidAt)
+      return { ok: true, view: 'repay', entry: entry };
+    return { ok: false, code: 'processed', ref: r.ref, status: r.status, decidedAt: r.ackAt, repaidAt: r.repaidAt || '' };
+  }
+  return { ok: true, view: 'ack', entry: entry };
 }
 
 function cashDecide_(p) {
   var t = lookupToken_(p.token);
-  if (!t || t.expired) return { ok: false, code: 'invalid' };
+  if (!t || t.expired || t.kind === 'cashreq') return { ok: false, code: 'invalid' };
   var r = findByRef_('Cash Log', CASH_COLS, t.ref);
   if (!r) return { ok: false, code: 'invalid' };
   if (r.status === 'ACKNOWLEDGED' || r.status === 'QUERIED') return { ok: false, code: 'processed', ref: r.ref, status: r.status };
   var now = new Date().toISOString();
+
   if (p.action === 'ack') {
+    // acknowledging a claim-linked entry settles the claim — that moves money,
+    // so it needs a typed name (same non-repudiation rule as accounts' Paid)
+    var claim = r.claimRef ? findByRef_('Claims', CLAIM_COLS, r.claimRef) : null;
+    var settles = claim && claim.status === 'APPROVED';
+    if (settles && !p.by) return { ok: false, message: 'Your name is required — acknowledging this marks claim ' + claim.ref + ' as paid in cash.' };
+
     writeCell_('Cash Log', r._row, CASH_COLS, 'status', 'ACKNOWLEDGED');
     writeCell_('Cash Log', r._row, CASH_COLS, 'ackAt', now);
-    return { ok: true, ref: r.ref, status: 'ACKNOWLEDGED' };
+
+    if (settles) {
+      var c = readConfig_();
+      writeCell_('Claims', claim._row, CLAIM_COLS, 'status', 'PAID');
+      writeCell_('Claims', claim._row, CLAIM_COLS, 'paidBy', p.by + ' — cash at ' + r.pharmacy + ' (entry ' + r.ref + ')');
+      writeCell_('Claims', claim._row, CLAIM_COLS, 'paidAt', now);
+      writeCell_('Claims', claim._row, CLAIM_COLS, 'paidMethod', 'cash');
+      sendMail_(claim.locumEmail, 'Your claim ' + claim.ref + ' was paid in cash',
+        '£' + money_(claim.totalAmount) + ' for claim ' + claim.ref + ' was paid to you in cash at ' + r.pharmacy + ' (cash entry ' + r.ref + ').\nNo bank transfer will follow — this settles the claim.');
+      sendMail_(c.emails.accounts, 'Claim ' + claim.ref + ' settled in CASH — do not pay by bank',
+        'Claim ' + claim.ref + ' (' + claim.locumName + ', £' + money_(claim.totalAmount) + ') was paid in cash at ' + r.pharmacy + ' — cash entry ' + r.ref + ', acknowledged by ' + p.by + '.\nIt is now marked PAID. Do not send a bank transfer for it.');
+    }
+    return { ok: true, ref: r.ref, status: 'ACKNOWLEDGED', settledClaim: settles ? claim.ref : '' };
   }
+
   if (!p.reason) return { ok: false, message: 'A reason is required.' };
   writeCell_('Cash Log', r._row, CASH_COLS, 'status', 'QUERIED');
   writeCell_('Cash Log', r._row, CASH_COLS, 'queryReason', p.reason);
+  if (r.payerEmail) sendMail_(r.payerEmail, 'Cash entry ' + r.ref + ' was queried',
+    'Head office queried this entry:\n\n' + p.reason + '\n\nSpeak to head office, then log a corrected entry if needed.');
   return { ok: true, ref: r.ref, status: 'QUERIED' };
+}
+
+function cashRepay_(p) {
+  var t = lookupToken_(p.token);
+  if (!t || t.expired || t.kind === 'cashreq') return { ok: false, code: 'invalid' };
+  var r = findByRef_('Cash Log', CASH_COLS, t.ref);
+  if (!r) return { ok: false, code: 'invalid' };
+  if (r.paidFrom !== 'pocket') return { ok: false, message: 'This entry was not paid from anyone’s pocket.' };
+  if (r.status !== 'ACKNOWLEDGED') return { ok: false, message: 'Acknowledge the entry first, then mark it repaid.' };
+  if (r.repaidAt) return { ok: false, code: 'processed', ref: r.ref, status: 'REPAID' };
+  if (!p.by) return { ok: false, message: 'Your name is required.' };
+  var now = new Date().toISOString();
+  writeCell_('Cash Log', r._row, CASH_COLS, 'repaidBy', p.by);
+  writeCell_('Cash Log', r._row, CASH_COLS, 'repaidAt', now);
+  if (r.payerEmail) sendMail_(r.payerEmail, 'You have been repaid for cash entry ' + r.ref,
+    '£' + money_(r.amount) + ' (' + r.category + ' at ' + r.pharmacy + ') has been repaid to you, marked by ' + p.by + '.');
+  return { ok: true, ref: r.ref, repaidAt: now };
+}
+
+// ---------------------------------------------------------------------------
+// CASH REQUESTS (pre-approval) — REQUESTED → APPROVED | REJECTED | LAPSED
+// ---------------------------------------------------------------------------
+function cashRequest_(pl) {
+  var c = readConfig_();
+  var errs = [];
+  if (!pl.manager) errs.push('Your name');
+  if (!pl.pharmacy) errs.push('Pharmacy');
+  if (!pl.category) errs.push('What it is for');
+  if (!pl.reason) errs.push('What you need and why');
+  if (pl.amountKnown && !(pl.estAmount > 0)) errs.push('The expected cost (or mark it not known yet)');
+  if (pl.managerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pl.managerEmail)) errs.push('A valid email (or leave it blank)');
+  if (errs.length) return { ok: false, errors: errs };
+
+  var ref = 'CR-' + Utilities.getUuid().replace(/-/g, '').slice(0, 5).toUpperCase();
+  var row = {};
+  REQ_COLS.forEach(function (k) { row[k] = ''; });
+  row.ref = ref; row.at = new Date().toISOString(); row.status = 'REQUESTED';
+  row.pharmacy = pl.pharmacy; row.manager = pl.manager; row.managerEmail = pl.managerEmail || '';
+  row.category = pl.category; row.estAmount = pl.amountKnown ? pl.estAmount : '';
+  row.reason = pl.reason; row.notes = pl.notes || '';
+  sheet_('Cash Requests').appendRow(REQ_COLS.map(function (k) { return row[k]; }));
+
+  var tok = mintToken_('cashreq', ref, 'decide');
+  sendMail_(c.emails.cashAck, 'Spend approval ' + ref + ' requested — ' + pl.category + (pl.amountKnown ? ' £' + money_(pl.estAmount) : ' (cost not known yet)'),
+    pl.manager + ' at ' + pl.pharmacy + ' is asking to spend' + (pl.amountKnown ? ' £' + money_(pl.estAmount) : ' (cost not known yet)') + ' on ' + pl.category + ':\n\n"' + pl.reason + '"\n\n' +
+    'Nothing has been spent. Approve (optionally with a cap) or turn it down:\n' + cashUrl_() + '?token=' + tok);
+  return { ok: true, ref: ref, status: 'REQUESTED' };
+}
+
+function cashReqDecide_(p) {
+  var t = lookupToken_(p.token);
+  if (!t || t.expired || t.kind !== 'cashreq') return { ok: false, code: 'invalid' };
+  var q = findByRef_('Cash Requests', REQ_COLS, t.ref);
+  if (!q) return { ok: false, code: 'invalid' };
+  if (q.status !== 'REQUESTED') return { ok: false, code: 'processed', ref: q.ref, status: q.status };
+  if (!p.by) return { ok: false, message: 'Your name is required.' };
+  var now = new Date().toISOString();
+
+  if (p.action === 'cashapprove') {
+    if (p.cap != null && p.cap !== '' && !(Number(p.cap) > 0)) return { ok: false, message: 'The cap must be a positive amount, or left blank.' };
+    writeCell_('Cash Requests', q._row, REQ_COLS, 'status', 'APPROVED');
+    writeCell_('Cash Requests', q._row, REQ_COLS, 'decidedBy', p.by);
+    writeCell_('Cash Requests', q._row, REQ_COLS, 'decidedAt', now);
+    if (p.cap != null && p.cap !== '') writeCell_('Cash Requests', q._row, REQ_COLS, 'cap', Number(p.cap));
+    if (q.managerEmail) sendMail_(q.managerEmail, 'Approved: ' + q.ref + ' — ' + q.category,
+      p.by + ' approved your request ' + q.ref + (p.cap != null && p.cap !== '' ? ' up to £' + money_(p.cap) : '') + '.\n' +
+      'When you spend it, log the payment on the cash-log page and link ' + q.ref + '. The approval lapses in 30 days if unused.');
+    return { ok: true, ref: q.ref, status: 'APPROVED', cap: p.cap != null && p.cap !== '' ? Number(p.cap) : null };
+  }
+
+  if (!p.reason) return { ok: false, message: 'A reason is required.' };
+  writeCell_('Cash Requests', q._row, REQ_COLS, 'status', 'REJECTED');
+  writeCell_('Cash Requests', q._row, REQ_COLS, 'decidedBy', p.by);
+  writeCell_('Cash Requests', q._row, REQ_COLS, 'decidedAt', now);
+  writeCell_('Cash Requests', q._row, REQ_COLS, 'decideReason', p.reason);
+  if (q.managerEmail) sendMail_(q.managerEmail, 'Not approved: ' + q.ref + ' — ' + q.category,
+    p.by + ' turned down request ' + q.ref + ':\n\n' + p.reason);
+  return { ok: true, ref: q.ref, status: 'REJECTED' };
+}
+
+// Safe-fields status lookup for the refs a branch device remembers. No token:
+// branch staff find outcomes on the page they already use (copy rule) — so
+// only non-sensitive fields ever leave here.
+function cashReqStatus_(refsCsv) {
+  var refs = String(refsCsv || '').toUpperCase().split(',').map(function (s) { return s.trim(); }).filter(String).slice(0, 20);
+  var out = [];
+  refs.forEach(function (ref) {
+    var q = findByRef_('Cash Requests', REQ_COLS, ref);
+    if (!q) return;
+    // lazy lapse: an unused approval dies after 30 days
+    if (q.status === 'APPROVED' && !q.linkedCashRef && q.decidedAt &&
+        (new Date() - new Date(q.decidedAt)) > 30 * 24 * 3600 * 1000) {
+      writeCell_('Cash Requests', q._row, REQ_COLS, 'status', 'LAPSED');
+      q.status = 'LAPSED';
+    }
+    out.push({
+      ref: q.ref, status: q.status, category: q.category, estAmount: q.estAmount,
+      cap: q.cap === '' || q.cap == null ? null : Number(q.cap),
+      decidedBy: q.decidedBy, decidedAt: q.decidedAt, decideReason: q.decideReason,
+      linkedCashRef: q.linkedCashRef
+    });
+  });
+  return { ok: true, requests: out };
 }
 
 // ---------------------------------------------------------------------------
@@ -672,7 +1008,21 @@ function adminSave_(p) {
     if (!EMAIL_RE.test((cfg.emails || {})[k] || '')) e.push('Global email "' + k + '" is invalid.');
   });
   if (!(cfg.locum.reminderDays >= 1) || !(cfg.locum.escalateDays > cfg.locum.reminderDays)) e.push('Reminder/escalation days are wrong.');
-  if (!(cfg.cash.threshold >= 0)) e.push('Cash threshold must be 0 or more.');
+  if (!(cfg.cash.threshold >= 0)) e.push('Cash review ceiling must be 0 or more.');
+  var cats = cfg.cash.categories;
+  if (cats != null) {
+    if (Object.prototype.toString.call(cats) !== '[object Array]' || !cats.length) e.push('At least one cash category is needed.');
+    else {
+      var catNames = {};
+      cats.forEach(function (ct) {
+        if (!ct.name) e.push('A cash category has no name.');
+        if (catNames[ct.name]) e.push('Duplicate cash category "' + ct.name + '".');
+        catNames[ct.name] = true;
+        if (['self', 'review', 'approve'].indexOf(ct.policy) < 0) e.push('Category "' + ct.name + '": policy must be self, review or approve.');
+        if (ct.cap != null && ct.cap !== '' && !(Number(ct.cap) >= 0)) e.push('Category "' + ct.name + '": the cap must be 0 or more, or blank.');
+      });
+    }
+  }
   if (e.length) return { ok: false, code: 'validation', errors: e };
 
   var ss = SpreadsheetApp.openById(PROPS.getProperty('CONFIG_SS_ID'));
@@ -692,11 +1042,17 @@ function adminSave_(p) {
     if (r[0] === 'email.cashAck') gs.getRange(i + 1, 2).setValue(cfg.emails.cashAck);
   });
   var ts = ss.getSheetByName('Tools');
+  var catsJson = cats != null ? JSON.stringify(cats.map(function (ct) {
+    return { name: ct.name, policy: ct.policy, cap: ct.cap == null || ct.cap === '' ? null : Number(ct.cap) };
+  })) : null;
+  var sawCats = false;
   ts.getDataRange().getValues().forEach(function (r, i) {
     if (r[0] === 'locum.reminderDays') ts.getRange(i + 1, 2).setValue(cfg.locum.reminderDays);
     if (r[0] === 'locum.escalateDays') ts.getRange(i + 1, 2).setValue(cfg.locum.escalateDays);
     if (r[0] === 'cash.threshold') ts.getRange(i + 1, 2).setValue(cfg.cash.threshold);
+    if (r[0] === 'cash.categories') { sawCats = true; if (catsJson) ts.getRange(i + 1, 2).setValue(catsJson); }
   });
+  if (catsJson && !sawCats) ts.appendRow(['cash.categories', catsJson]);
   (p.changes || []).forEach(function (ch) { logChange_(ch, p.by); });
   PROPS.deleteProperty('CONFIG_CACHE'); // bust last-good so next read is fresh
   return { ok: true, updatedAt: new Date().toISOString() };

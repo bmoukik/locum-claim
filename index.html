@@ -104,7 +104,9 @@ summary{cursor:pointer;color:var(--red);font-weight:700;font-size:15px}
 //                                      | {ok:false, code:'processed'|'expired'|'invalid'}
 //   POST {action:'approve', token}          -> {ok, ref, status:'APPROVED', locum}
 //   POST {action:'reject',  token, reason}  -> {ok, ref, status:'REJECTED', locum}
-//   POST {action:'paid',    token, by}      -> {ok, ref, status:'PAID', locum}
+//   POST {action:'paid',    token, by, method?} -> {ok, ref, status:'PAID', locum}
+//        method 'cash' = a cash-log entry covered it (no bank transfer);
+//        the cash-log app can also settle a claim directly (spec §6a)
 //   POST {action:'raise',   token, by, to, reason} -> {ok, ref, status:'RAISED', locum}
 //
 // Two server-side checks raise flags both the validator and accounts see:
@@ -450,6 +452,7 @@ function renderAccounts(token,c,errMsg){
     '</div>'+
     '<label>Your name</label><input type="text" id="a_by" autocomplete="name">'+
     '<p class="hint">Recorded against the payment, so we know who sent it.</p>'+
+    '<div class="check"><input type="checkbox" id="a_cash"><span>Paid in cash at the branch — a cash-log entry covers this, do not send a bank transfer</span></div>'+
     '<button class="btn green" id="paidbtn">Paid — money sent</button>'+
     '<details><summary>Send it back instead…</summary>'+
     '<label>Send it back to</label>'+
@@ -470,7 +473,9 @@ function renderAccounts(token,c,errMsg){
     var by=document.getElementById('a_by').value.trim();
     if(!by) return renderAccounts(token,c,'Put your name in before marking it paid — the payment is recorded against it.');
     try{ localStorage.setItem('crest_accounts_name', by); }catch(e){}
-    settle(token,'paid',{by:by},c);
+    var extra={by:by};
+    if(document.getElementById('a_cash').checked) extra.method='cash';
+    settle(token,'paid',extra,c);
   };
   document.getElementById('raisebtn').onclick=function(){
     var by=document.getElementById('a_by').value.trim();
@@ -496,7 +501,10 @@ function settle(token,action,extra,c){
     }
     if(res.status==='PAID'){
       h('<div class="card center"><h2>Paid</h2>'+
-        '<div class="banner good"><b>'+esc(res.ref)+'</b> marked paid by '+esc(extra.by)+'. '+esc(res.locum)+' has been emailed to say the money is on its way.</div>'+
+        '<div class="banner good"><b>'+esc(res.ref)+'</b> marked paid by '+esc(extra.by)+'. '+
+        (extra.method==='cash'
+          ? esc(res.locum)+' has been emailed that the claim is settled in cash — no bank transfer.'
+          : esc(res.locum)+' has been emailed to say the money is on its way.')+'</div>'+
         '<p class="hint">You can close this page.</p></div>');
     } else {
       var who = extra.to==='locum' ? res.locum : (c.approval&&c.approval.by)||'the validator';
@@ -665,7 +673,7 @@ function demoHandle(method,p){
     if(!c) return {ok:false, code:'invalid'};
     if(c.status!=='APPROVED') return {ok:false, code:'processed', ref:c.ref, status:c.status};
     if(p.action==='paid'){
-      c.status='PAID'; c.payment={by:p.by, at:new Date().toISOString()};
+      c.status='PAID'; c.payment={by:p.by, at:new Date().toISOString(), method:p.method==='cash'?'cash':'bank'};
       lsSet('lc_claim_'+c.ref, c); demoHistStatus(c.ref,'PAID');
       return {ok:true, ref:c.ref, status:'PAID', locum:c.locum.name};
     }

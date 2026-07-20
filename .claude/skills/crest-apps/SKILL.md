@@ -72,6 +72,14 @@ below in this box is production fact, not plan.
   and the README architecture rationale. The prototype's own tests/UI targeted
   its dead backend and were deliberately not carried over; the old repo stays
   archived (not deleted) as history.
+- **Cash redesign deploy order (NOT YET DONE — blocks merging to main):** the
+  20 Jul cash work adds backend actions the deployed script doesn't have.
+  Order: (1) paste new `Code.gs` into the editor, (2) run `migrateCash_()`
+  once (appends new columns, creates Cash Requests tab, seeds
+  `cash.categories`), (3) Deploy → Manage deployments → New version — for
+  BOTH deployments (public + admin), (4) only THEN merge the branch to main
+  so Pages picks up the new pages. Merging pages first breaks the live cash
+  form. Tests: `node tests/test_logic.js` (116 checks) covers the whole model.
 - **QR posters:** https://bmoukik.github.io/locum-claim/posters.html — 25 A4
   pages (one per branch + generic). Each QR = `index.html?ph=<branch>` which
   pre-selects the pharmacy + loads its validators (still changeable). QRs are
@@ -82,8 +90,8 @@ below in this box is production fact, not plan.
 
 | File | Purpose | Status |
 |---|---|---|
-| `index.html` | **Locum payment claim** — locum submits hours/rate/bank details → chosen validator approves via token link → accounts taps Paid (emails locum) or sends it back with a reason | **LIVE** (accounts step, duplicate-days + bank-changed flags, self-approval block, `?ph=` QR prefill; demo mode when `__API_URL__`) |
-| `cash-log.html` | **Till outflow log** — manager records any cash leaving the till | **LIVE** (shared config threshold/pharmacies, device remembers branch+name) |
+| `index.html` | **Locum payment claim** — locum submits hours/rate/bank details → chosen validator approves via token link → accounts taps Paid (emails locum) or sends it back with a reason | **LIVE** (accounts step, duplicate-days + bank-changed flags, self-approval block, `?ph=` QR prefill; demo mode when `__API_URL__`). **BUILT, NOT DEPLOYED (20 Jul):** "paid in cash" settle option + live cash flags |
+| `cash-log.html` | **Branch spend & approvals log** — records (money already spent) + requests (ask first), review floored by category policy, reimbursement, locum-cash links to claims | **REDESIGNED 20 Jul — BUILT, NOT DEPLOYED.** The live page still runs the old flat-£20 model until the new Code.gs is pasted (see deploy order below) |
 | `admin.html` | Demo/design preview of the admin console | Demo only — the live console is the private admin deployment |
 | `AdminConsole.html` | The REAL admin console (pasted in Apps Script as HTML file `Admin`) | **LIVE** behind Google sign-in + allowlist + PIN |
 | `Code.gs` | The whole backend (spec: `BACKEND_SPEC.md`) | **DEPLOYED** — repo copy is source of truth, editor is paste target |
@@ -128,10 +136,30 @@ fullPage). Demo tokens print to the browser console where applicable.
 
 ## Key decisions already made (don't relitigate)
 
-- **Cash log:** threshold sign-off — under £20 auto-recorded, £20+ requires
-  head-office acknowledgement (token link). Locum-paid-in-cash lives in the
-  cash log as a category (with role/GPhC/right-to-work compliance fields),
-  not in the claim app.
+- **Cash log (SUPERSEDED 20 Jul 2026 — new model below):** ~~threshold
+  sign-off — under £20 auto-recorded, £20+ requires head-office
+  acknowledgement~~. Replaced per the owner's 13 Jul Notion steer + 20 Jul
+  design session by the **record/request model**: three independent dimensions
+  per entry — (1) record (money already spent — the common case, cash is
+  sorted at the counter) vs request (ask first, cost may be unknown → approve
+  with optional cap, lapses in 30 days); (2) review level floored by a
+  per-category **policy matrix** (self / review / approve + per-category cap)
+  with a global review ceiling as backstop — submitter can escalate, never
+  downgrade; (3) settlement source till / own pocket (→ OWED → Repaid, HO
+  typed-name tap, payer emailed) / invoice-to-HO. Emergency path: spending
+  without asking is never blocked, always flagged + reviewed (or people route
+  around the app). Flags: over-cap, repeat-spend-on-one-approval, duplicate
+  entry.
+- **Locum cash links to the claim system (20 Jul 2026):** cash is a
+  **settlement method for a claim, never a parallel payment route** — else the
+  validator trail and duplicate-day checks are bypassed at the till. Claim
+  first (intended): approved claim + linked cash entry → HO ack (typed name
+  required — it moves money) marks the claim PAID `paidMethod=cash`, locum
+  emailed, accounts warned off the bank transfer. Cash first (reality): entry
+  carries the locum's email; any later claim from that email grows a **live
+  flag** (computed at view time, both validator + accounts views), and
+  accounts settles it with the "paid in cash at the branch" tick. Locum
+  entries are always reviewed and require claim ref or locum email.
 - **Stock transfer:** phone/WhatsApp coordination stays exactly as it is —
   the app only records what moved (~20s form) + one-tap receive. No request/
   broadcast/approval workflow, no WhatsApp bot (official API costs per
@@ -332,7 +360,11 @@ Frontend is **done and verified in demo mode** on branch
 ## Parked / later (do not build now)
 
 Stock transfer (on hold); bulk-order/demand-forecasting toolkit (boss first);
-line-level claim adjustment; audit/reporting dashboard; and the boss-decision
+line-level claim adjustment; audit/reporting dashboard; **cash phase-2 items
+(20 Jul): till-float ledger/balance tracking (creeps into cash management —
+boss first; `paidFrom` is captured now so the data exists), receipt photo
+storage beyond the existing Drive link, month-end category digest to accounts
+(data is shaped for it)**; and the boss-decision
 compliance items — **IR35 / employment status** (payroll vs self-employed for
 cash/locum payments), whether the claim replaces an invoice for the tax trail,
 and **GPhC register / right-to-work verification** (currently format-checked /

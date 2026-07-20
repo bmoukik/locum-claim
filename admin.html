@@ -262,8 +262,24 @@ function normalise(c){
   if(c.locum.reminderDays==null) c.locum.reminderDays = 2;
   if(c.locum.escalateDays==null) c.locum.escalateDays = 4;
   if(c.cash.threshold==null) c.cash.threshold = 20;
+  if(!(c.cash.categories&&c.cash.categories.length)) c.cash.categories = [
+    {name:'Locum / casual staff (cash)', policy:'review', cap:null},
+    {name:'Staff welfare / team lunch', policy:'self', cap:30},
+    {name:'Petty supplies', policy:'self', cap:30},
+    {name:'Emergency stock', policy:'self', cap:50},
+    {name:'Travel / parking / courier', policy:'self', cap:30},
+    {name:'Customer cash refund', policy:'review', cap:null},
+    {name:'Repairs / maintenance', policy:'approve', cap:null},
+    {name:'Postage', policy:'self', cap:20},
+    {name:'Other', policy:'review', cap:null}
+  ];
+  c.cash.categories = c.cash.categories.map(function(x){
+    return {name:String(x.name||''), policy:(x.policy==='review'||x.policy==='approve')?x.policy:'self',
+      cap:(x.cap==null||x.cap==='')?null:Number(x.cap)};
+  });
   return c;
 }
+var POLICY_LABELS = {self:'Log it (routine)', review:'Head office reviews', approve:'Ask first (approval needed)'};
 
 // ===========================================================================
 // APP SHELL
@@ -301,6 +317,18 @@ function renderMain(errs){
       '<td><input type="checkbox" data-phact="'+i+'"'+(p.active?' checked':'')+'></td>'+
       '<td><span class="cov'+(n?'':' none')+'">'+n+' approver'+(n===1?'':'s')+'</span></td>'+
       '<td style="text-align:right"><button class="mini" data-rmph="'+i+'">Remove</button></td>'+
+      '</tr>';
+  }).join('');
+
+  var catRows = CONFIG.cash.categories.map(function(c,i){
+    var opts = ['self','review','approve'].map(function(p){
+      return '<option value="'+p+'"'+(c.policy===p?' selected':'')+'>'+POLICY_LABELS[p]+'</option>';
+    }).join('');
+    return '<tr>'+
+      '<td class="nm">'+esc(c.name)+'</td>'+
+      '<td><select data-catpolicy="'+i+'">'+opts+'</select></td>'+
+      '<td style="max-width:110px"><input type="number" data-catcap="'+i+'" min="0" step="1" value="'+(c.cap==null?'':esc(c.cap))+'" placeholder="none"'+(c.policy==='review'?' disabled':'')+'></td>'+
+      '<td style="text-align:right"><button class="mini" data-rmcat="'+i+'">Remove</button></td>'+
       '</tr>';
   }).join('');
 
@@ -368,8 +396,14 @@ function renderMain(errs){
     '</div></div>'+
     '<div class="sec" id="sec-cash" style="margin-top:18px">'+
     '<h2>Cash log</h2>'+
-    '<p class="sub">Under the threshold, cash is logged automatically. At or over it, head office must acknowledge.</p>'+
-    '<div class="field" style="max-width:220px"><label>Acknowledgement threshold (£)</label><input type="number" id="c_thr" min="0" step="1" value="'+esc(CONFIG.cash.threshold)+'"></div>'+
+    '<p class="sub">Each category has a rule: <b>Log it</b> (routine, recorded automatically up to its limit), <b>Head office reviews</b> (always seen after the fact), or <b>Ask first</b> (needs a yes before spending). Branches can always ask for a review — these rules are the floor, not the ceiling. Payments to people, own-pocket spends and emergencies are always reviewed regardless.</p>'+
+    '<div class="field" style="max-width:220px"><label>Review everything at or over (£)</label><input type="number" id="c_thr" min="0" step="1" value="'+esc(CONFIG.cash.threshold)+'">'+
+    '<p class="hint">The backstop — applies whatever the category rule says.</p></div>'+
+    '<div class="tblwrap"><table class="t">'+
+    '<tr><th>Category</th><th>Rule</th><th>Limit (£)</th><th></th></tr>'+catRows+
+    '</table></div>'+
+    '<div class="addrow"><input type="text" id="newcat" placeholder="New category, exactly as staff should see it">'+
+    '<button type="button" class="btn2" id="addcat">+ Add category</button></div>'+
     '</div>'+
     '</div>'+
 
@@ -424,6 +458,19 @@ function bindMain(){
     CONFIG.validators.push({pharmacy:(CONFIG.pharmacies[0]||{}).name||'', name:'', email:'', active:true});
     renderMain();
   };
+  document.querySelectorAll('[data-rmcat]').forEach(function(b){
+    b.onclick=function(){ pull(); CONFIG.cash.categories.splice(Number(b.dataset.rmcat),1); renderMain(); };
+  });
+  document.querySelectorAll('[data-catpolicy]').forEach(function(s){
+    s.onchange=function(){ pull(); renderMain(); };
+  });
+  $('addcat').onclick=function(){
+    pull();
+    var n=$('newcat').value.trim();
+    if(n) CONFIG.cash.categories.push({name:n, policy:'review', cap:null});
+    renderMain();
+  };
+  $('newcat').onkeydown=function(e){ if(e.key==='Enter') $('addcat').click(); };
   $('pinsave').onclick=changePin;
   $('reviewbtn').onclick=function(){ pull(); review(); };
 }
@@ -443,6 +490,11 @@ function pull(){
     CONFIG.locum.escalateDays=Number($('l_esc').value);
     CONFIG.cash.threshold=Number($('c_thr').value);
   }
+  document.querySelectorAll('[data-catpolicy]').forEach(function(el){ CONFIG.cash.categories[Number(el.dataset.catpolicy)].policy=el.value; });
+  document.querySelectorAll('[data-catcap]').forEach(function(el){
+    var v=el.value.trim();
+    CONFIG.cash.categories[Number(el.dataset.catcap)].cap = v===''?null:Number(v);
+  });
 }
 
 // ===========================================================================
@@ -476,7 +528,15 @@ function validate(){
   if(!(CONFIG.locum.escalateDays>=1)) e.push('Escalation days must be at least 1.');
   if(CONFIG.locum.escalateDays<=CONFIG.locum.reminderDays)
     e.push('Escalation must come after the reminder — set it higher than '+CONFIG.locum.reminderDays+'.');
-  if(!(CONFIG.cash.threshold>=0)) e.push('Cash threshold must be £0 or more.');
+  if(!(CONFIG.cash.threshold>=0)) e.push('The cash review ceiling must be £0 or more.');
+  if(!CONFIG.cash.categories.length) e.push('At least one cash category is needed.');
+  var catNames={};
+  CONFIG.cash.categories.forEach(function(c){
+    if(!c.name) e.push('A cash category has no name.');
+    if(catNames[c.name]) e.push('Two cash categories are both called "'+c.name+'".');
+    catNames[c.name]=true;
+    if(c.cap!=null && !(c.cap>=0)) e.push('Category "'+c.name+'": the limit must be £0 or more, or blank.');
+  });
   return e;
 }
 
@@ -518,7 +578,19 @@ function diff(){
   if(ORIG.locum.escalateDays!==CONFIG.locum.escalateDays)
     out.push('Escalation '+ORIG.locum.escalateDays+' → '+CONFIG.locum.escalateDays+' working days');
   if(ORIG.cash.threshold!==CONFIG.cash.threshold)
-    out.push('Cash threshold £'+ORIG.cash.threshold+' → £'+CONFIG.cash.threshold);
+    out.push('Cash review ceiling £'+ORIG.cash.threshold+' → £'+CONFIG.cash.threshold);
+
+  var oC={}, nC={};
+  (ORIG.cash.categories||[]).forEach(function(c){ oC[c.name]=c; });
+  CONFIG.cash.categories.forEach(function(c){ nC[c.name]=c; });
+  Object.keys(nC).forEach(function(n){
+    var c=nC[n], o=oC[n];
+    var capTxt=function(x){ return x.cap==null?'no limit':'£'+x.cap; };
+    if(!o){ out.push('Added cash category "'+n+'" — '+POLICY_LABELS[c.policy]+', '+capTxt(c)); return; }
+    if(o.policy!==c.policy) out.push('Cash category "'+n+'": '+POLICY_LABELS[o.policy]+' → '+POLICY_LABELS[c.policy]);
+    if(String(o.cap)!==String(c.cap)) out.push('Cash category "'+n+'" limit '+capTxt(o)+' → '+capTxt(c));
+  });
+  Object.keys(oC).forEach(function(n){ if(!nC[n]) out.push('Removed cash category "'+n+'"'); });
   return out;
 }
 

@@ -52,6 +52,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);border-c
 .badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:700;letter-spacing:.3px}
 .badge.log{background:#DCFCE7;color:#14532D}
 .badge.pend{background:#FEF3C7;color:#92400E}
+.badge.bad{background:#FEE2E2;color:#991B1B}
+.badge.owe{background:#EDE9FE;color:#5B21B6}
 .spin{display:inline-block;width:22px;height:22px;border:3px solid var(--accent-soft);border-top-color:var(--navy);border-radius:50%;animation:sp .8s linear infinite;vertical-align:middle}
 @keyframes sp{to{transform:rotate(360deg)}}
 .thumb{max-width:100%;border-radius:10px;border:1px solid var(--border);margin-top:8px}
@@ -59,6 +61,18 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);border-c
 .foot{margin-top:34px;color:#8a93a8;font-size:12.5px;text-align:center}
 details{margin-top:14px}
 summary{cursor:pointer;color:var(--red);font-weight:700;font-size:15px}
+.seg{display:flex;border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-top:14px}
+.seg button{flex:1;border:0;background:#fff;padding:13px 8px;font-size:15px;font-weight:700;color:#59647d;cursor:pointer;font-family:inherit}
+.seg button.on{background:var(--navy);color:#fff}
+.radio{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
+.radio label{flex:1;min-width:110px;border:1.5px solid var(--border);border-radius:10px;padding:11px 8px;text-align:center;font-weight:600;font-size:14px;margin:0;cursor:pointer;color:#3b4a66}
+.radio input{display:none}
+.radio label.on{border-color:var(--navy);background:var(--accent-soft);color:var(--navy-ink)}
+.flag{background:#FFF7ED;border:1px solid #FDBA74;color:var(--amber);border-radius:10px;padding:10px 12px;font-size:13.5px;margin-top:8px;line-height:1.5}
+.reqrow{border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:10px;font-size:14px}
+.reqrow .r1{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.reqrow .ref{font-weight:800;color:var(--navy)}
+.reqrow .why{color:#59647d;margin-top:4px}
 </style>
 </head>
 <body>
@@ -74,25 +88,30 @@ summary{cursor:pointer;color:var(--red);font-weight:700;font-size:15px}
 
 <script>
 // ===========================================================================
-// Crest Pharmacies — Cash Log
-// Records money leaving the till for ANY purpose (locum cash, team lunch,
-// petty supplies, travel, refunds…). One line = one answer to "where did the
-// cash go?". Threshold rule: spends below the threshold are logged
-// automatically; at or above it, head office must acknowledge.
+// Crest Pharmacies — Cash Log (records + requests + reimbursement)
+// One line = one answer to "where did the cash go?" — OR "may I spend this?".
+// Three independent dimensions per entry (spec BACKEND_SPEC.md §6):
+//   what it is    - record (money already spent) | request (asking first)
+//   review level  - self-acknowledged | head-office review | pre-approval,
+//                   chosen per entry but FLOORED by the category policy —
+//                   you can always escalate, never downgrade below policy
+//   settlement    - till | own pocket (reimbursement owed) | invoice to HO
+// Locum-category entries link to the locum claim system: cash is a settlement
+// method for a claim, never a parallel payment route (spec §6a).
 //
-// Pharmacies, the threshold and the acknowledgement email all come from the
-// shared config (see BACKEND_SPEC.md) — admin.html is the only thing that
-// writes them. This page is read-only and fails safe: if the config cannot be
-// read, the backend serves the last-good copy, and the defaults below are the
-// last line of defence.
-//
-// BACKEND CONTRACT (mirror the locum app's Apps Script, new tab "Cash Log"):
-//   GET  ?action=cashmeta                  -> {ok, pharmacies:[], categories:[], ackThreshold:20}
-//   POST {action:'cashlog', payload}       -> {ok, ref, status:'RECORDED'|'PENDING', threshold}
-//   GET  ?action=cashentry&token=..        -> {ok, entry} | {ok:false, code:'processed'|'expired'|'invalid', ...}
-//   POST {action:'ack',   token}           -> {ok, ref, status:'ACKNOWLEDGED'}
-//   POST {action:'query', token, reason}   -> {ok, ref, status:'QUERIED'}
-// The token link goes to head office ONLY for entries at/above the threshold.
+// BACKEND CONTRACT (Apps Script, tabs "Cash Log" + "Cash Requests"):
+//   GET  ?action=cashmeta                    -> {ok, pharmacies:[], categories:[{name,policy,cap}], reviewCeiling}
+//   POST {action:'cashlog', payload}         -> {ok, ref, status:'RECORDED'|'PENDING', flags:[]}
+//   POST {action:'cashrequest', payload}     -> {ok, ref, status:'REQUESTED'}
+//   GET  ?action=cashreqstatus&refs=A,B      -> {ok, requests:[{ref,status,cap,...}]} (safe fields only)
+//   GET  ?action=cashentry&token=..          -> {ok, view:'ack'|'repay'|'decide', entry|request} | {ok:false, code:...}
+//   POST {action:'ack', token, by?}          -> by required when it settles a linked claim
+//   POST {action:'query', token, reason}
+//   POST {action:'cashrepay', token, by}
+//   POST {action:'cashapprove', token, by, cap?} / {action:'cashreject', token, by, reason}
+// The review-flooring rules here are MIRRORED from Code.gs cashJudge_ — change
+// both or they drift. The demo backend does NOT read the locum app's demo
+// store: a demo claim link is simulated as an APPROVED claim.
 // ===========================================================================
 var API_URL = 'https://script.google.com/macros/s/AKfycbzo_SG8akvk_7P82WXMGmAuHfeTcU_xZj1nahQSJ8x9h24445oO1NyWIJhwPDvB2kc0/exec';
 var DEMO = API_URL.indexOf('__') === 0;
@@ -102,8 +121,8 @@ function h(html){ $app.innerHTML = html; }
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function money(n){ return Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,','); }
 function todayISO(){ var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function $id(id){ return document.getElementById(id); }
 
-// --- API (plain fetch in live mode; in-memory/localStorage in demo mode) ----
 function apiGet(params){
   if(DEMO) return demo('GET', params);
   var q = Object.keys(params).map(function(k){return k+'='+encodeURIComponent(params[k])}).join('&');
@@ -118,138 +137,273 @@ function fatal(msg){
     '<button class="btn" onclick="location.reload()">Try again</button></div>');
 }
 
-var CATEGORIES = [
-  'Locum / casual staff (cash)',
-  'Staff welfare / team lunch',
-  'Petty supplies',
-  'Emergency stock',
-  'Travel / parking / courier',
-  'Customer cash refund',
-  'Repairs / maintenance',
-  'Postage',
-  'Other'
+// fail-safe defaults — the last line of defence if config can't be read
+var DEFAULT_CATEGORIES = [
+  {name:'Locum / casual staff (cash)', policy:'review', cap:null},
+  {name:'Staff welfare / team lunch', policy:'self', cap:30},
+  {name:'Petty supplies', policy:'self', cap:30},
+  {name:'Emergency stock', policy:'self', cap:50},
+  {name:'Travel / parking / courier', policy:'self', cap:30},
+  {name:'Customer cash refund', policy:'review', cap:null},
+  {name:'Repairs / maintenance', policy:'approve', cap:null},
+  {name:'Postage', policy:'self', cap:20},
+  {name:'Other', policy:'review', cap:null}
 ];
 function isLocumCat(c){ return /^Locum/.test(c||''); }
 
-var META=null;
+var META=null, MYREQS=[];
+
+function savedReqRefs(){ try{ return JSON.parse(localStorage.getItem('crest_reqs')||'[]'); }catch(e){ return []; } }
+function rememberReq(ref){
+  try{ var r=savedReqRefs(); if(r.indexOf(ref)<0){ r.unshift(ref); localStorage.setItem('crest_reqs', JSON.stringify(r.slice(0,20))); } }catch(e){}
+}
 
 // --- router ---
 var TOKEN = new URLSearchParams(location.search).get('token');
 if(DEMO) document.getElementById('demobar').style.display='block';
 if (!DEMO && API_URL.indexOf('__')===0){ fatal('Setup not finished: the API URL has not been configured yet.'); }
-else if (TOKEN){ ackPage(TOKEN); } else { formPage(); }
+else if (TOKEN){ hoPage(TOKEN); } else { branchPage(); }
 
 // ===========================================================================
-// MANAGER — LOG A CASH PAYMENT
+// BRANCH — two paths: log money already spent, or ask before spending
 // ===========================================================================
-function formPage(){
+function branchPage(){
   apiGet({action:'cashmeta'}).then(function(meta){
     if(!meta.ok) return fatal('Could not load the form. Please try again in a minute.');
-    META=meta; if(!META.ackThreshold) META.ackThreshold=20;
-    renderForm();
+    META=meta;
+    if(!(META.categories&&META.categories.length)) META.categories=DEFAULT_CATEGORIES;
+    if(META.reviewCeiling==null) META.reviewCeiling=META.ackThreshold!=null?META.ackThreshold:20;
+    var refs=savedReqRefs();
+    if(refs.length){
+      apiGet({action:'cashreqstatus', refs:refs.join(',')}).then(function(res){
+        MYREQS=(res&&res.ok&&res.requests)||[]; renderBranch('record');
+      }).catch(function(){ MYREQS=[]; renderBranch('record'); });
+    } else renderBranch('record');
   }).catch(function(){ fatal('No connection — check your signal and try again.'); });
 }
 
-function renderForm(){
-  var cats=(META.categories&&META.categories.length?META.categories:CATEGORIES);
-  h(
+function catFor(name){
+  var m=null; META.categories.forEach(function(c){ if(c.name===name) m=c; }); return m;
+}
+function approvedUnspent(){
+  return MYREQS.filter(function(r){ return r.status==='APPROVED' && !r.linkedCashRef; });
+}
+
+function renderBranch(mode){
+  h('<div class="seg" id="modeseg">'+
+    '<button id="seg_record" class="'+(mode==='record'?'on':'')+'">Log a payment</button>'+
+    '<button id="seg_request" class="'+(mode==='request'?'on':'')+'">Ask first</button>'+
+    '</div>'+
+    '<div id="pane"></div>'+
+    '<div id="myreqs"></div>');
+  $id('seg_record').onclick=function(){ renderBranch('record'); };
+  $id('seg_request').onclick=function(){ renderBranch('request'); };
+  if(mode==='record') renderRecordForm(); else renderRequestForm();
+  renderMyRequests();
+}
+
+function renderMyRequests(){
+  if(!MYREQS.length){ $id('myreqs').innerHTML=''; return; }
+  $id('myreqs').innerHTML='<div class="card"><h3 style="margin-top:0">Your approval requests</h3>'+
+    MYREQS.map(function(r){
+      var b, note='';
+      if(r.status==='REQUESTED'){ b='<span class="badge pend">Waiting for head office</span>'; }
+      else if(r.status==='APPROVED'){
+        b='<span class="badge log">Approved'+(r.cap!=null?' up to £'+money(r.cap):'')+'</span>';
+        note=r.linkedCashRef?('Spent — logged as '+esc(r.linkedCashRef)):'Log the payment when you spend it and link this reference. Lapses 30 days after approval.';
+      }
+      else if(r.status==='REJECTED'){ b='<span class="badge bad">Not approved</span>'; note=esc(r.decideReason||''); }
+      else if(r.status==='LAPSED'){ b='<span class="badge bad">Lapsed — ask again if still needed</span>'; }
+      return '<div class="reqrow"><div class="r1"><span class="ref">'+esc(r.ref)+'</span>'+b+'</div>'+
+        '<div class="why">'+esc(r.category)+(r.estAmount?' · £'+money(r.estAmount):'')+(note?'<br>'+note:'')+'</div></div>';
+    }).join('')+'</div>';
+}
+
+// ---------------------------------------------------------------------------
+// RECORD — money already spent
+// ---------------------------------------------------------------------------
+function renderRecordForm(){
+  var cats=META.categories;
+  $id('pane').innerHTML=
   '<div class="card" id="formwrap">'+
   '<h2>Log a cash payment</h2>'+
-  '<p class="sub">Record money taken from the till for any purpose, so the drawer balances and head office can see where cash went. Do this at the counter, while you remember.</p>'+
+  '<p class="sub">Record money that has already left the till (or someone’s pocket), so the drawer balances and head office can see where cash went. Do this at the counter, while you remember.</p>'+
   '<div class="err" id="errbox"></div>'+
   '<label>Your name (who paid it out)</label><input type="text" id="f_mgr" autocomplete="name">'+
   '<label>Pharmacy</label><select id="f_pharmacy"><option value="">— select —</option></select>'+
   '<label>What was it for?</label><select id="f_cat"><option value="">— select —</option>'+
-    cats.map(function(c){return '<option>'+esc(c)+'</option>'}).join('')+'</select>'+
-  // locum-only compliance block
+    cats.map(function(c){return '<option>'+esc(c.name)+'</option>'}).join('')+'</select>'+
+  '<p class="hint" id="cathint"></p>'+
+  '<div id="approvewrap" style="display:none">'+
+    '<label>Link your approval</label><select id="f_reqref"></select>'+
+    '<p class="hint">This category needs head-office approval before spending. Pick your approval, or tick emergency below if you could not ask first.</p>'+
+  '</div>'+
+  // locum entries link to the claim system — cash settles a claim, it does not
+  // bypass it (validation + duplicate-day checks live there)
   '<div id="locwrap" style="display:none">'+
     '<label>Who was paid?</label><input type="text" id="f_person" autocomplete="off">'+
     '<label>Role</label><select id="f_role"><option value="">— select —</option><option>Pharmacist</option><option>Dispenser</option><option>Driver</option><option>Other</option></select>'+
     '<div id="gphc_wrap" style="display:none"><label>GPhC registration number</label><input type="text" id="f_gphc" inputmode="numeric" maxlength="7"><p class="hint">7 digits.</p></div>'+
     '<div class="check"><input type="checkbox" id="f_rtw"><span>I have seen proof of their right to work in the UK</span></div>'+
+    '<label>Their claim reference (best)</label><input type="text" id="f_claimref" placeholder="CLM-XXXXX" autocapitalize="characters">'+
+    '<p class="hint">On the confirmation email/screen they got when they submitted their claim. Linking it marks the claim as paid in cash so accounts never pay it twice.</p>'+
+    '<label>No claim yet? Their email address</label><input type="email" id="f_locemail" autocomplete="off">'+
+    '<p class="hint">Ask them to submit a claim today — this email is how head office matches it to this cash payment.</p>'+
   '</div>'+
   '<label>Amount paid (£)</label><input type="number" id="f_amount" step="0.01" min="0.01" inputmode="decimal">'+
-  '<p class="hint" id="thresholdhint"></p>'+
+  '<p class="hint" id="reviewhint"></p>'+
   '<label>Date</label><input type="date" id="f_date">'+
   '<label>Reason / details</label><input type="text" id="f_reason" placeholder="e.g. Sat cover, or lunch for 5 staff">'+
-  '<div class="check"><input type="checkbox" id="f_till" checked><span>Paid from the till</span></div>'+
+  '<label>Where did the money come from?</label>'+
+  '<div class="radio" id="f_paidfrom">'+
+    '<label data-v="till" class="on">The till</label>'+
+    '<label data-v="pocket">Own pocket</label>'+
+    '<label data-v="invoice">Invoice to head office</label>'+
+  '</div>'+
+  '<div id="pocketwrap" style="display:none">'+
+    '<p class="warn">Paying from your own pocket means head office owes this money back. They will see it and mark it repaid.</p>'+
+    '<label>Email for repayment updates (optional)</label><input type="email" id="f_payeremail">'+
+  '</div>'+
+  '<div class="check"><input type="checkbox" id="f_emergency"><span>I could not ask first — this was an emergency</span></div>'+
+  '<div class="check" id="wantreviewrow"><input type="checkbox" id="f_wantreview"><span>Ask head office to look at this one anyway</span></div>'+
   '<label>Receipt photo (optional)</label><input type="file" id="f_receipt" accept="image/*" capture="environment">'+
   '<div id="receiptprev"></div>'+
   '<label>Notes (optional)</label><textarea id="f_notes" rows="2"></textarea>'+
   '<button type="button" class="btn" id="submitbtn">Save to cash log</button>'+
-  '</div>');
+  '</div>';
 
-  var $=function(id){return document.getElementById(id)};
-  META.pharmacies.forEach(function(p){var o=document.createElement('option');o.textContent=p;$('f_pharmacy').appendChild(o)});
-  $('f_date').value=todayISO();
-  // this device remembers its branch and who is on it — one-time pick, changeable
+  META.pharmacies.forEach(function(p){var o=document.createElement('option');o.textContent=p;$id('f_pharmacy').appendChild(o)});
+  $id('f_date').value=todayISO();
   try{
     var b=localStorage.getItem('crest_branch');
-    if(b && META.pharmacies.indexOf(b)>=0) $('f_pharmacy').value=b;
-    $('f_mgr').value=localStorage.getItem('crest_name')||'';
+    if(b && META.pharmacies.indexOf(b)>=0) $id('f_pharmacy').value=b;
+    $id('f_mgr').value=localStorage.getItem('crest_name')||'';
   }catch(e){}
-  $('f_cat').onchange=function(){
-    $('locwrap').style.display=isLocumCat(this.value)?'block':'none';
+
+  $id('f_cat').onchange=function(){
+    var c=catFor(this.value);
+    $id('locwrap').style.display=isLocumCat(this.value)?'block':'none';
+    var appr = c && c.policy==='approve';
+    $id('approvewrap').style.display=appr?'block':'none';
+    if(appr){
+      var sel=$id('f_reqref'); sel.innerHTML='<option value="">— no approval to link —</option>';
+      approvedUnspent().forEach(function(r){
+        var o=document.createElement('option'); o.value=r.ref;
+        o.textContent=r.ref+' — '+r.category+(r.cap!=null?' (up to £'+money(r.cap)+')':'');
+        sel.appendChild(o);
+      });
+      var man=document.createElement('option'); man.value='__manual__'; man.textContent='Type a reference…';
+      sel.appendChild(man);
+      sel.onchange=function(){
+        if(this.value==='__manual__'){
+          var typed=prompt('Approval reference (CR-XXXXX):')||'';
+          if(typed.trim()){ var o=document.createElement('option'); o.value=typed.trim().toUpperCase(); o.textContent=typed.trim().toUpperCase(); this.insertBefore(o,this.lastChild); this.value=o.value; }
+          else this.value='';
+        }
+        updateReview();
+      };
+    }
+    updateCatHint(); updateReview();
   };
-  $('f_role')&&($('f_role').onchange=function(){
-    $('gphc_wrap').style.display=(this.value==='Pharmacist')?'block':'none';
+  $id('f_role').onchange=function(){
+    $id('gphc_wrap').style.display=(this.value==='Pharmacist')?'block':'none';
+  };
+  $id('f_amount').oninput=updateReview;
+  $id('f_emergency').onchange=updateReview;
+  $id('f_wantreview').onchange=updateReview;
+  Array.prototype.forEach.call($id('f_paidfrom').children,function(l){
+    l.onclick=function(){
+      Array.prototype.forEach.call($id('f_paidfrom').children,function(x){x.classList.remove('on')});
+      l.classList.add('on');
+      $id('pocketwrap').style.display=(l.getAttribute('data-v')==='pocket')?'block':'none';
+      updateReview();
+    };
   });
-  $('f_amount').oninput=updateThreshold;
-  $('f_receipt').onchange=function(){
-    var f=this.files&&this.files[0]; var box=$('receiptprev'); box.innerHTML='';
+  $id('f_receipt').onchange=function(){
+    var f=this.files&&this.files[0]; var box=$id('receiptprev'); box.innerHTML='';
     if(!f) return;
     var rd=new FileReader();
     rd.onload=function(){ RECEIPT=rd.result; box.innerHTML='<img class="thumb" src="'+RECEIPT+'">'; };
     rd.readAsDataURL(f);
   };
-  $('submitbtn').onclick=submit;
-  updateThreshold();
+  $id('submitbtn').onclick=submitRecord;
+  updateCatHint(); updateReview();
 }
 
 var RECEIPT=null;
-function updateThreshold(){
-  var el=document.getElementById('thresholdhint'); if(!el)return;
-  var amt=Number((document.getElementById('f_amount')||{}).value)||0;
-  var t=META.ackThreshold;
-  if(!amt){ el.innerHTML='Under £'+t+' is logged automatically. £'+t+' or more needs head-office acknowledgement.'; el.style.color=''; return; }
-  if(amt>=t){ el.innerHTML='£'+money(amt)+' — this will be sent to head office to acknowledge before it is final.'; el.style.color='var(--amber)'; }
-  else { el.innerHTML='£'+money(amt)+' — under the £'+t+' threshold, logged automatically. No sign-off needed.'; el.style.color='var(--green)'; }
+function paidFrom(){
+  var on=null;
+  Array.prototype.forEach.call($id('f_paidfrom').children,function(l){ if(l.classList.contains('on')) on=l.getAttribute('data-v'); });
+  return on||'till';
+}
+function updateCatHint(){
+  var el=$id('cathint'); if(!el) return;
+  var c=catFor(($id('f_cat')||{}).value);
+  if(!c){ el.textContent=''; return; }
+  if(isLocumCat(c.name)) el.textContent='Payments to people are always seen by head office, and link to the locum claim system below.';
+  else if(c.policy==='review') el.textContent='Head office always sees this category.';
+  else if(c.policy==='approve') el.textContent='This category needs head-office approval BEFORE spending — use "Ask first" next time.';
+  else el.textContent='Routine — logged automatically'+(c.cap!=null?' up to £'+money(c.cap):'')+'.';
+}
+// mirror of Code.gs cashJudge_ — UX preview only, the server recomputes
+function updateReview(){
+  var el=$id('reviewhint'); if(!el) return;
+  var c=catFor(($id('f_cat')||{}).value);
+  var amt=Number(($id('f_amount')||{}).value)||0;
+  if(!c||!amt){ el.textContent=''; return; }
+  var pending=false;
+  if(c.policy==='review'||isLocumCat(c.name)) pending=true;
+  if(c.policy==='approve'&&!($id('f_reqref')&&$id('f_reqref').value)) pending=true;
+  if(amt>=META.reviewCeiling) pending=true;
+  if(c.policy==='self'&&c.cap!=null&&amt>c.cap) pending=true;
+  if(paidFrom()==='pocket') pending=true;
+  if($id('f_emergency').checked||$id('f_wantreview').checked) pending=true;
+  if(pending){ el.innerHTML='£'+money(amt)+' — head office will review this entry.'; el.style.color='var(--amber)'; }
+  else { el.innerHTML='£'+money(amt)+' — logged automatically, no sign-off needed. It stays in the ledger head office can see.'; el.style.color='var(--green)'; }
 }
 function showErrors(msgs){
-  var b=document.getElementById('errbox');
+  var b=$id('errbox');
   b.innerHTML='<b>Please fix:</b><br>'+msgs.map(function(m){return '• '+esc(m)}).join('<br>');
   b.style.display='block';window.scrollTo({top:0,behavior:'smooth'});
 }
-function submit(){
-  var $=function(id){return document.getElementById(id)};
-  var e=[], cat=$('f_cat').value, amt=Number($('f_amount').value);
-  if(!$('f_mgr').value.trim())e.push('Your name');
-  if(!$('f_pharmacy').value)e.push('Pharmacy');
+function submitRecord(){
+  var e=[], cat=$id('f_cat').value, amt=Number($id('f_amount').value), pf=paidFrom();
+  if(!$id('f_mgr').value.trim())e.push('Your name');
+  if(!$id('f_pharmacy').value)e.push('Pharmacy');
   if(!cat)e.push('What it was for');
   if(isLocumCat(cat)){
-    if(!$('f_person').value.trim())e.push('Who was paid');
-    var role=$('f_role').value; if(!role)e.push('Role');
-    if(role==='Pharmacist'&&!/^\d{7}$/.test($('f_gphc').value.trim()))e.push('GPhC number (7 digits)');
-    if(!$('f_rtw').checked)e.push('Right-to-work confirmation');
+    if(!$id('f_person').value.trim())e.push('Who was paid');
+    var role=$id('f_role').value; if(!role)e.push('Role');
+    if(role==='Pharmacist'&&!/^\d{7}$/.test($id('f_gphc').value.trim()))e.push('GPhC number (7 digits)');
+    if(!$id('f_rtw').checked)e.push('Right-to-work confirmation');
+    if(!$id('f_claimref').value.trim()&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($id('f_locemail').value.trim()))
+      e.push('Their claim reference — or their email so head office can match the claim later');
   }
   if(!(amt>0))e.push('Amount (£)');
-  if(!$('f_date').value)e.push('Date');
-  if(!$('f_reason').value.trim())e.push('Reason / details');
+  if(!$id('f_date').value)e.push('Date');
+  if(!$id('f_reason').value.trim())e.push('Reason / details');
+  if(pf==='pocket'&&$id('f_payeremail').value.trim()&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($id('f_payeremail').value.trim()))
+    e.push('A valid email for repayment updates (or leave it blank)');
   if(e.length){showErrors(e);return;}
-  $('errbox').style.display='none';
+  $id('errbox').style.display='none';
   try{
-    localStorage.setItem('crest_branch', $('f_pharmacy').value);
-    localStorage.setItem('crest_name', $('f_mgr').value.trim());
+    localStorage.setItem('crest_branch', $id('f_pharmacy').value);
+    localStorage.setItem('crest_name', $id('f_mgr').value.trim());
   }catch(e2){}
-  var btn=$('submitbtn');btn.disabled=true;btn.textContent='Saving…';
+  var btn=$id('submitbtn');btn.disabled=true;btn.textContent='Saving…';
   var payload={
-    manager:$('f_mgr').value.trim(), pharmacy:$('f_pharmacy').value, category:cat,
-    amount:amt, date:$('f_date').value, reason:$('f_reason').value.trim(),
-    fromTill:$('f_till').checked, receipt:RECEIPT||'', notes:$('f_notes').value.trim()
+    manager:$id('f_mgr').value.trim(), pharmacy:$id('f_pharmacy').value, category:cat,
+    amount:amt, date:$id('f_date').value, reason:$id('f_reason').value.trim(),
+    paidFrom:pf, payerEmail:pf==='pocket'?$id('f_payeremail').value.trim():'',
+    emergency:$id('f_emergency').checked, wantReview:$id('f_wantreview').checked,
+    requestRef:($id('f_reqref')&&$id('f_reqref').value&&$id('f_reqref').value!=='__manual__')?$id('f_reqref').value:'',
+    receipt:RECEIPT||'', notes:$id('f_notes').value.trim()
   };
   if(isLocumCat(cat)){
-    payload.person=$('f_person').value.trim(); payload.role=$('f_role').value;
-    payload.gphc=$('f_gphc').value.trim(); payload.rtw=true;
+    payload.person=$id('f_person').value.trim(); payload.role=$id('f_role').value;
+    payload.gphc=$id('f_gphc').value.trim(); payload.rtw=true;
+    payload.claimRef=$id('f_claimref').value.trim().toUpperCase();
+    payload.locumEmail=$id('f_locemail').value.trim();
   }
   apiPost({action:'cashlog', payload:payload}).then(function(res){
     if(!res.ok){showErrors(res.errors||[res.message||'Something went wrong — try again.']);btn.disabled=false;btn.textContent='Save to cash log';return;}
@@ -257,11 +411,12 @@ function submit(){
     h('<div class="card center"><h2>Logged</h2>'+
       '<p>Reference</p><p class="bigref">'+esc(res.ref)+'</p>'+
       '<p class="amt">£'+money(payload.amount)+'</p>'+
-      '<p><span class="badge '+(pending?'pend':'log')+'">'+(pending?'Awaiting head-office acknowledgement':'Recorded — no sign-off needed')+'</span></p>'+
+      '<p><span class="badge '+(pending?'pend':'log')+'">'+(pending?'Sent to head office to review':'Recorded — no sign-off needed')+'</span></p>'+
+      ((res.flags&&res.flags.length)?res.flags.map(function(f){return '<div class="flag" style="text-align:left">'+esc(f)+'</div>'}).join(''):'')+
       '<div class="banner '+(pending?'info':'good')+'">'+
         (pending
-          ? 'This is £'+money(payload.amount)+' — head office has been sent this entry to acknowledge. It is in the cash log now and will be marked final once acknowledged.'
-          : 'Saved to the cash log. Under the £'+META.ackThreshold+' threshold, so no acknowledgement is needed. Keep the receipt if you have one.')+
+          ? 'It is in the cash log now and head office has been sent it to review. Nothing more to do here.'
+          : 'Saved to the cash log. Keep the receipt if you have one.')+
       '</div>'+
       '<button class="btn" onclick="location.reload()">Log another payment</button></div>');
     window.scrollTo(0,0);
@@ -271,88 +426,269 @@ function submit(){
   });
 }
 
+// ---------------------------------------------------------------------------
+// REQUEST — asking before spending (cost may be unknown)
+// ---------------------------------------------------------------------------
+function renderRequestForm(){
+  var cats=META.categories;
+  $id('pane').innerHTML=
+  '<div class="card">'+
+  '<h2>Ask before spending</h2>'+
+  '<p class="sub">For things that need a yes from head office first — a repair, a bigger buy. Nothing is spent yet; you are asking. The answer shows up on this page.</p>'+
+  '<div class="err" id="errbox"></div>'+
+  '<label>Your name</label><input type="text" id="q_mgr" autocomplete="name">'+
+  '<label>Pharmacy</label><select id="q_pharmacy"><option value="">— select —</option></select>'+
+  '<label>What is it for?</label><select id="q_cat"><option value="">— select —</option>'+
+    cats.map(function(c){return '<option>'+esc(c.name)+'</option>'}).join('')+'</select>'+
+  '<label>Do you know the cost?</label>'+
+  '<div class="radio" id="q_known">'+
+    '<label data-v="yes" class="on">Yes, roughly</label>'+
+    '<label data-v="no">Not yet</label>'+
+  '</div>'+
+  '<div id="estwrap"><label>Expected cost (£)</label><input type="number" id="q_amount" step="0.01" min="0.01" inputmode="decimal"></div>'+
+  '<p class="hint" id="q_nohint" style="display:none">That is fine — head office can say yes in principle, usually with a "fine up to £X" limit.</p>'+
+  '<label>What you need and why</label><textarea id="q_reason" rows="3" placeholder="e.g. Fridge door seal has gone — engineer quoted £180"></textarea>'+
+  '<label>Email for the decision (optional)</label><input type="email" id="q_email">'+
+  '<p class="hint">The decision also appears on this page under "Your approval requests" — the email is just a nudge.</p>'+
+  '<label>Notes (optional)</label><textarea id="q_notes" rows="2"></textarea>'+
+  '<button type="button" class="btn" id="q_submit">Send to head office</button>'+
+  '</div>';
+
+  META.pharmacies.forEach(function(p){var o=document.createElement('option');o.textContent=p;$id('q_pharmacy').appendChild(o)});
+  try{
+    var b=localStorage.getItem('crest_branch');
+    if(b && META.pharmacies.indexOf(b)>=0) $id('q_pharmacy').value=b;
+    $id('q_mgr').value=localStorage.getItem('crest_name')||'';
+  }catch(e){}
+  Array.prototype.forEach.call($id('q_known').children,function(l){
+    l.onclick=function(){
+      Array.prototype.forEach.call($id('q_known').children,function(x){x.classList.remove('on')});
+      l.classList.add('on');
+      var yes=l.getAttribute('data-v')==='yes';
+      $id('estwrap').style.display=yes?'block':'none';
+      $id('q_nohint').style.display=yes?'none':'block';
+    };
+  });
+  $id('q_submit').onclick=submitRequest;
+}
+function submitRequest(){
+  var known=false;
+  Array.prototype.forEach.call($id('q_known').children,function(l){ if(l.classList.contains('on')&&l.getAttribute('data-v')==='yes') known=true; });
+  var e=[];
+  if(!$id('q_mgr').value.trim())e.push('Your name');
+  if(!$id('q_pharmacy').value)e.push('Pharmacy');
+  if(!$id('q_cat').value)e.push('What it is for');
+  if(known&&!(Number($id('q_amount').value)>0))e.push('The expected cost (or pick "Not yet")');
+  if(!$id('q_reason').value.trim())e.push('What you need and why');
+  if($id('q_email').value.trim()&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($id('q_email').value.trim()))e.push('A valid email (or leave it blank)');
+  if(e.length){showErrors(e);return;}
+  $id('errbox').style.display='none';
+  try{
+    localStorage.setItem('crest_branch', $id('q_pharmacy').value);
+    localStorage.setItem('crest_name', $id('q_mgr').value.trim());
+  }catch(e2){}
+  var btn=$id('q_submit');btn.disabled=true;btn.textContent='Sending…';
+  apiPost({action:'cashrequest', payload:{
+    manager:$id('q_mgr').value.trim(), managerEmail:$id('q_email').value.trim(),
+    pharmacy:$id('q_pharmacy').value, category:$id('q_cat').value,
+    amountKnown:known, estAmount:known?Number($id('q_amount').value):null,
+    reason:$id('q_reason').value.trim(), notes:$id('q_notes').value.trim()
+  }}).then(function(res){
+    if(!res.ok){showErrors(res.errors||[res.message||'Something went wrong — try again.']);btn.disabled=false;btn.textContent='Send to head office';return;}
+    rememberReq(res.ref);
+    h('<div class="card center"><h2>Sent</h2>'+
+      '<p>Reference</p><p class="bigref">'+esc(res.ref)+'</p>'+
+      '<p><span class="badge pend">Waiting for head office</span></p>'+
+      '<div class="banner info">Nothing has been spent. The decision will appear on this page under "Your approval requests" — check back, or watch your email if you gave one.</div>'+
+      '<button class="btn" onclick="location.reload()">Back to the cash log</button></div>');
+    window.scrollTo(0,0);
+  }).catch(function(){
+    showErrors(['No connection — this was NOT sent. Check your signal and try again.']);
+    btn.disabled=false;btn.textContent='Send to head office';
+  });
+}
+
 // ===========================================================================
-// HEAD OFFICE — ACKNOWLEDGE (threshold entries only)
+// HEAD OFFICE — review an entry / mark repaid / decide a request
 // ===========================================================================
-function ackPage(token){
+function hoPage(token){
   apiGet({action:'cashentry',token:token}).then(function(c){
     if(!c.ok){
-      if(c.code==='processed') return h('<div class="card"><div class="banner info">Entry <b>'+esc(c.ref)+'</b> was already <b>'+esc(c.status)+'</b>'+(c.decidedAt?' on '+new Date(c.decidedAt).toLocaleString('en-GB'):'')+'.</div><p class="hint">No further action needed.</p></div>');
-      if(c.code==='expired') return h('<div class="card"><div class="banner bad">This link has expired.</div><p class="hint">Ask the manager to re-log it, or contact head office.</p></div>');
+      if(c.code==='processed') return h('<div class="card"><div class="banner info"><b>'+esc(c.ref)+'</b> was already <b>'+esc(c.status)+'</b>'+(c.decidedAt?' on '+new Date(c.decidedAt).toLocaleString('en-GB'):'')+(c.repaidAt?' · repaid '+new Date(c.repaidAt).toLocaleString('en-GB'):'')+'.</div><p class="hint">No further action needed.</p></div>');
+      if(c.code==='expired') return h('<div class="card"><div class="banner bad">This link has expired.</div><p class="hint">Ask the branch to re-send it, or contact head office.</p></div>');
       return h('<div class="card"><div class="banner bad">This link is not valid.</div></div>');
     }
-    renderAck(token,c.entry||c);
+    if(c.view==='decide') return renderDecideRequest(token,c.request);
+    if(c.view==='repay') return renderRepay(token,c.entry);
+    renderReview(token,c.entry);
   }).catch(function(){ fatal('No connection — check your signal and try again.'); });
 }
 
-function renderAck(token,c,errMsg){
-  var loc = isLocumCat(c.category);
-  h('<div class="card">'+
-    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
-    '<h2>Cash entry '+esc(c.ref)+'</h2>'+
-    '<p class="sub">Acknowledging confirms this cash-out is approved and recorded against the till.</p>'+
-    '<p class="amt center">£'+money(c.amount)+'</p>'+
+function entryTable(c){
+  var loc=isLocumCat(c.category);
+  var from=c.paidFrom==='pocket'?'Own pocket — reimbursement owed':c.paidFrom==='invoice'?'Invoice to head office (no cash moved)':'The till';
+  return '<p class="amt center">£'+money(c.amount)+'</p>'+
     '<table class="kv">'+
     '<tr><td>What for</td><td><b>'+esc(c.category)+'</b><br>'+esc(c.reason)+'</td></tr>'+
     '<tr><td>Pharmacy</td><td>'+esc(c.pharmacy)+'</td></tr>'+
     '<tr><td>Paid by</td><td>'+esc(c.manager)+'</td></tr>'+
     '<tr><td>Date</td><td>'+esc(c.date)+'</td></tr>'+
-    '<tr><td>From till</td><td>'+(c.fromTill?'Yes':'No')+'</td></tr>'+
+    '<tr><td>Money from</td><td>'+esc(from)+'</td></tr>'+
+    (c.requestRef?'<tr><td>Approval</td><td>'+esc(c.requestRef)+'</td></tr>':'')+
     (loc?'<tr><td>Paid to</td><td>'+esc(c.person||'')+' ('+esc(c.role||'')+')'+(c.gphc?'<br>GPhC '+esc(c.gphc):'')+(c.rtw?'<br>Right to work confirmed':'')+'</td></tr>':'')+
+    (loc&&c.claim?'<tr><td>Linked claim</td><td><b>'+esc(c.claim.ref)+'</b> — '+esc(c.claim.status)+', '+esc(c.claim.locumName)+', £'+money(c.claim.totalAmount)+'</td></tr>':'')+
+    (loc&&!c.claim&&c.locumEmail?'<tr><td>Locum email</td><td>'+esc(c.locumEmail)+' (no claim linked yet)</td></tr>':'')+
     (c.notes?'<tr><td>Notes</td><td>'+esc(c.notes)+'</td></tr>':'')+
     '</table>'+
-    (c.receipt?'<h3>Receipt</h3><img class="thumb" src="'+esc(c.receipt)+'">':'<p class="hint" style="margin-top:12px">No receipt attached.</p>')+
+    ((c.flags&&c.flags.length)?c.flags.map(function(f){return '<div class="flag">'+esc(f)+'</div>'}).join(''):'')+
+    (c.receipt?'<h3>Receipt</h3><img class="thumb" src="'+esc(c.receipt)+'">':'<p class="hint" style="margin-top:12px">No receipt attached.</p>');
+}
+
+function renderReview(token,c,errMsg){
+  var settles=c.claim&&c.claim.status==='APPROVED';
+  h('<div class="card">'+
+    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
+    '<h2>Cash entry '+esc(c.ref)+'</h2>'+
+    '<p class="sub">Acknowledging confirms this cash-out is reviewed and recorded'+(settles?' — and marks the linked claim as paid in cash.':'.')+'</p>'+
+    entryTable(c)+
+    (settles?'<div class="banner info">Acknowledging will mark claim <b>'+esc(c.claim.ref)+'</b> ('+esc(c.claim.locumName)+', £'+money(c.claim.totalAmount)+') as <b>paid in cash</b>. The locum is emailed, and accounts are told not to pay it by bank.</div>'+
+      '<label>Your name (recorded on the claim)</label><input type="text" id="ackby">':'')+
     '<button class="btn green" id="ackbtn">Acknowledge</button>'+
     '<details><summary>Query this entry…</summary>'+
-    '<label>Reason (the manager sees this)</label>'+
+    '<label>Reason (the branch sees this)</label>'+
     '<textarea id="qreason" rows="3"></textarea>'+
     '<button class="btn red" id="qbtn">Send query</button>'+
     '</details>'+
     '</div>');
-
-  document.getElementById('ackbtn').onclick=function(){ decide(token,'ack','',c); };
-  document.getElementById('qbtn').onclick=function(){
-    var reason=document.getElementById('qreason').value.trim();
-    if(!reason){renderAck(token,c,'A reason is required to query this entry.');return;}
-    decide(token,'query',reason,c);
+  $id('ackbtn').onclick=function(){
+    var by=settles?($id('ackby').value.trim()):'';
+    if(settles&&!by){ renderReview(token,c,'Your name is required — acknowledging this marks claim '+c.claim.ref+' as paid in cash.'); return; }
+    hoAction(token,{action:'ack',token:token,by:by},c);
+  };
+  $id('qbtn').onclick=function(){
+    var reason=$id('qreason').value.trim();
+    if(!reason){renderReview(token,c,'A reason is required to query this entry.');return;}
+    hoAction(token,{action:'query',token:token,reason:reason},c);
   };
 }
 
-function decide(token,action,reason,c){
-  var ab=document.getElementById('ackbtn'),qb=document.getElementById('qbtn');
+function renderRepay(token,c,errMsg){
+  h('<div class="card">'+
+    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
+    '<h2>Cash entry '+esc(c.ref)+'</h2>'+
+    '<p class="center"><span class="badge owe">Acknowledged — repayment owed</span></p>'+
+    entryTable(c)+
+    '<div class="banner info">'+esc(c.manager)+' paid this from their own pocket. Mark it repaid once the money has actually been given back.</div>'+
+    '<label>Your name</label><input type="text" id="repayby">'+
+    '<button class="btn green" id="repaybtn">Mark repaid</button>'+
+    '</div>');
+  $id('repaybtn').onclick=function(){
+    var by=$id('repayby').value.trim();
+    if(!by){ renderRepay(token,c,'Your name is required.'); return; }
+    var btn=$id('repaybtn');btn.disabled=true;btn.textContent='Working…';
+    apiPost({action:'cashrepay',token:token,by:by}).then(function(res){
+      if(!res.ok){ if(res.code==='processed') return h('<div class="card"><div class="banner info"><b>'+esc(res.ref)+'</b> is already marked repaid.</div></div>');
+        return renderRepay(token,c,res.message||'Something went wrong — try again.'); }
+      h('<div class="card center"><h2>Repaid</h2>'+
+        '<div class="banner good"><b>'+esc(res.ref)+'</b> marked repaid. '+(c.payerEmail?esc(c.manager)+' has been emailed.':'')+'</div>'+
+        '<p class="hint">You can close this page.</p></div>');
+    }).catch(function(){ renderRepay(token,c,'No connection — nothing was changed. Try again.'); });
+  };
+}
+
+function hoAction(token,body,c){
+  var ab=$id('ackbtn'),qb=$id('qbtn');
   if(ab)ab.disabled=true; if(qb)qb.disabled=true;
-  (action==='ack'?ab:qb).textContent='Working…';
-  apiPost({action:action,token:token,reason:reason}).then(function(res){
+  (body.action==='ack'?ab:qb).textContent='Working…';
+  apiPost(body).then(function(res){
     if(!res.ok){
       if(res.code==='processed') return h('<div class="card"><div class="banner info">Entry <b>'+esc(res.ref)+'</b> was already <b>'+esc(res.status)+'</b>.</div></div>');
-      return renderAck(token,c,res.message||'Something went wrong — try again.');
+      return renderReview(token,c,res.message||'Something went wrong — try again.');
     }
     if(res.status==='ACKNOWLEDGED'){
+      var extra=res.settledClaim?' Claim <b>'+esc(res.settledClaim)+'</b> is marked paid in cash.':'';
+      var owed=c.paidFrom==='pocket';
       h('<div class="card center"><h2>Acknowledged</h2>'+
-        '<div class="banner good"><b>'+esc(res.ref)+'</b> acknowledged and recorded against the till. '+esc(c.manager)+' has been notified.</div>'+
+        '<div class="banner good"><b>'+esc(res.ref)+'</b> acknowledged and recorded.'+extra+'</div>'+
+        (owed?'<div class="banner info">This was paid from '+esc(c.manager)+'’s own pocket — reopen this same link once the money is given back to mark it repaid.</div>':'')+
         '<p class="hint">You can close this page.</p></div>');
     } else {
       h('<div class="card center"><h2>Queried</h2>'+
-        '<div class="banner info"><b>'+esc(res.ref)+'</b> queried. '+esc(c.manager)+' has been sent your reason.</div>'+
+        '<div class="banner info"><b>'+esc(res.ref)+'</b> queried. The branch has been sent your reason'+(c.payerEmail?'':' (no email on file — it also shows if they ask head office)')+'.</div>'+
         '<p class="hint">You can close this page.</p></div>');
     }
     window.scrollTo(0,0);
-  }).catch(function(){ renderAck(token,c,'No connection — nothing was changed. Try again.'); });
+  }).catch(function(){ renderReview(token,c,'No connection — nothing was changed. Try again.'); });
+}
+
+function renderDecideRequest(token,q,errMsg){
+  h('<div class="card">'+
+    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
+    '<h2>Spend request '+esc(q.ref)+'</h2>'+
+    '<p class="sub">Nothing has been spent — the branch is asking first.</p>'+
+    (q.estAmount?'<p class="amt center">about £'+money(q.estAmount)+'</p>':'<p class="center"><span class="badge pend">Cost not known yet</span></p>')+
+    '<table class="kv">'+
+    '<tr><td>What for</td><td><b>'+esc(q.category)+'</b><br>'+esc(q.reason)+'</td></tr>'+
+    '<tr><td>Pharmacy</td><td>'+esc(q.pharmacy)+'</td></tr>'+
+    '<tr><td>Asked by</td><td>'+esc(q.manager)+'</td></tr>'+
+    (q.notes?'<tr><td>Notes</td><td>'+esc(q.notes)+'</td></tr>':'')+
+    '</table>'+
+    '<label>Your name (recorded on the decision)</label><input type="text" id="d_by">'+
+    '<label>Cap it? (optional — "fine up to £X, ring me beyond")</label>'+
+    '<input type="number" id="d_cap" step="0.01" min="0.01" inputmode="decimal" placeholder="Leave blank for no cap">'+
+    '<button class="btn green" id="d_ok">Approve</button>'+
+    '<details><summary>Turn it down…</summary>'+
+    '<label>Reason (the branch sees this)</label>'+
+    '<textarea id="d_reason" rows="3"></textarea>'+
+    '<button class="btn red" id="d_no">Not approved</button>'+
+    '</details>'+
+    '</div>');
+  $id('d_ok').onclick=function(){
+    var by=$id('d_by').value.trim();
+    if(!by){ renderDecideRequest(token,q,'Your name is required.'); return; }
+    var cap=$id('d_cap').value.trim();
+    reqAction(token,q,{action:'cashapprove',token:token,by:by,cap:cap===''?null:Number(cap)});
+  };
+  $id('d_no').onclick=function(){
+    var by=$id('d_by').value.trim(), reason=$id('d_reason').value.trim();
+    if(!by){ renderDecideRequest(token,q,'Your name is required.'); return; }
+    if(!reason){ renderDecideRequest(token,q,'A reason is required to turn a request down.'); return; }
+    reqAction(token,q,{action:'cashreject',token:token,by:by,reason:reason});
+  };
+}
+function reqAction(token,q,body){
+  var ob=$id('d_ok'),nb=$id('d_no');
+  if(ob)ob.disabled=true; if(nb)nb.disabled=true;
+  apiPost(body).then(function(res){
+    if(!res.ok){
+      if(res.code==='processed') return h('<div class="card"><div class="banner info">Request <b>'+esc(res.ref)+'</b> was already <b>'+esc(res.status)+'</b>.</div></div>');
+      return renderDecideRequest(token,q,res.message||'Something went wrong — try again.');
+    }
+    if(res.status==='APPROVED'){
+      h('<div class="card center"><h2>Approved</h2>'+
+        '<div class="banner good"><b>'+esc(res.ref)+'</b> approved'+(res.cap!=null?' up to £'+money(res.cap):'')+'. The branch sees this on their cash-log page'+(q.managerEmail?' and by email':'')+'. It lapses in 30 days if unused.</div>'+
+        '<p class="hint">You can close this page.</p></div>');
+    } else {
+      h('<div class="card center"><h2>Not approved</h2>'+
+        '<div class="banner info"><b>'+esc(res.ref)+'</b> turned down. The branch sees your reason.</div>'+
+        '<p class="hint">You can close this page.</p></div>');
+    }
+  }).catch(function(){ renderDecideRequest(token,q,'No connection — nothing was changed. Try again.'); });
 }
 
 // ===========================================================================
 // DEMO BACKEND (only runs when API_URL is not configured)
-// Lets you click through the whole flow with no server. Uses localStorage so
-// the head-office acknowledge link works across page loads.
+// Mirrors the review-flooring + request lifecycle in localStorage so every
+// flow is clickable with no server. It does NOT read the locum app's demo
+// store — a linked claim is simulated as APPROVED with a matching amount.
 // ===========================================================================
 function demo(method, p){
   return new Promise(function(resolve){
     setTimeout(function(){ resolve(demoHandle(method,p)); }, 300);
   });
 }
-function demoStore(token,obj){ try{ localStorage.setItem('cashlog_'+token, JSON.stringify(obj)); }catch(e){} }
-function demoLoad(token){ try{ return JSON.parse(localStorage.getItem('cashlog_'+token)); }catch(e){ return null; } }
-// the same shared config admin.html writes — edit it there and it shows up here
+function demoStore(k,obj){ try{ localStorage.setItem(k, JSON.stringify(obj)); }catch(e){} }
+function demoLoad(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
 var DEMO_CONFIG_FALLBACK = {
   pharmacies:[
     {name:'Crest — High Street', active:true},
@@ -360,51 +696,140 @@ var DEMO_CONFIG_FALLBACK = {
     {name:'Crest — Market Square', active:true},
     {name:'Crest — Station Road', active:true}
   ],
-  cash:{threshold:20}
+  cash:{threshold:20, categories:DEFAULT_CATEGORIES}
 };
 function demoConfig(){
-  try{ var s=localStorage.getItem('crest_config'); if(s) return JSON.parse(s); }catch(e){}
+  try{ var s=localStorage.getItem('crest_config'); if(s){ var c=JSON.parse(s);
+    if(!c.cash) c.cash={threshold:20};
+    if(!(c.cash.categories&&c.cash.categories.length)) c.cash.categories=DEFAULT_CATEGORIES;
+    return c; } }catch(e){}
   return DEMO_CONFIG_FALLBACK;
 }
-function demoThreshold(){
-  var c=demoConfig();
-  return (c.cash&&c.cash.threshold!=null)?c.cash.threshold:20;
+function demoRefIndex(){ return demoLoad('cashdemo_refs')||{}; }
+function demoByRef(ref){ var t=demoRefIndex()[ref]; return t?demoLoad(t):null; }
+function demoJudge(pl,cat,ceiling,req){ // mirror of Code.gs cashJudge_
+  var flags=[], pending=false;
+  function need(f){ pending=true; if(f) flags.push(f); }
+  if(cat.policy==='review') pending=true;
+  if(isLocumCat(pl.category)) pending=true;
+  if(pl.wantReview) pending=true;
+  if(pl.amount>=ceiling) pending=true;
+  if(cat.policy==='self'&&cat.cap!=null&&pl.amount>cat.cap) pending=true;
+  if(pl.paidFrom==='pocket') need('Paid from someone’s own pocket — reimbursement owed (mark repaid below once settled).');
+  if(pl.emergency) need('Spent without asking first (emergency) — review.');
+  if(cat.policy==='approve'&&!req) need('This category needs approval before spending — no approval is linked. Treat as an emergency spend and review.');
+  if(req){
+    if(req.status!=='APPROVED') need('Linked approval '+req.ref+' is '+req.status+', not APPROVED.');
+    else if(req.cap!=null&&pl.amount>req.cap+0.005) need('£'+money(pl.amount)+' against an approval capped at £'+money(req.cap)+'.');
+  }
+  return {pending:pending, flags:flags};
 }
 function demoHandle(method,p){
+  var cfg=demoConfig();
+  var ceiling=(cfg.cash&&cfg.cash.threshold!=null)?cfg.cash.threshold:20;
   if(method==='GET' && p.action==='cashmeta'){
-    var cfg=demoConfig();
-    return {ok:true, ackThreshold:demoThreshold(),
+    return {ok:true, reviewCeiling:ceiling, ackThreshold:ceiling,
       pharmacies:(cfg.pharmacies||[]).filter(function(x){return x.active;}).map(function(x){return x.name;}),
-      categories:CATEGORIES};
+      categories:cfg.cash.categories};
+  }
+  if(method==='GET' && p.action==='cashreqstatus'){
+    var out=[]; String(p.refs||'').split(',').forEach(function(ref){
+      var q=demoByRef(ref.trim()); if(q&&q._kind==='req') out.push(q);
+    });
+    return {ok:true, requests:out};
+  }
+  if(method==='POST' && p.action==='cashrequest'){
+    var pl=p.payload;
+    var ref='CR-'+Math.random().toString(36).slice(2,7).toUpperCase();
+    var token='demo'+Math.random().toString(36).slice(2,9);
+    var q={_kind:'req', ref:ref, status:'REQUESTED', pharmacy:pl.pharmacy, manager:pl.manager,
+      managerEmail:pl.managerEmail, category:pl.category, estAmount:pl.amountKnown?pl.estAmount:'',
+      reason:pl.reason, notes:pl.notes, cap:null, decidedBy:'', decidedAt:'', decideReason:'', linkedCashRef:''};
+    demoStore(token,q);
+    var idx=demoRefIndex(); idx[ref]=token; demoStore('cashdemo_refs',idx);
+    console.log('%c[DEMO] Head-office decide link:', 'color:#0D47A1;font-weight:bold', location.pathname+'?token='+token);
+    return {ok:true, ref:ref, status:'REQUESTED'};
   }
   if(method==='POST' && p.action==='cashlog'){
-    var pl=p.payload, t=demoThreshold();
-    var ref='CX-'+Math.random().toString(36).slice(2,7).toUpperCase();
-    var pending=pl.amount>=t;
-    var token='demo'+Math.random().toString(36).slice(2,9);
-    var entry={ref:ref, status:pending?'PENDING':'RECORDED'};
-    for(var k in pl) entry[k]=pl[k];
-    demoStore(token, entry);
-    if(pending){
-      console.log('%c[DEMO] Head-office acknowledge link:', 'color:#0D47A1;font-weight:bold',
-        location.pathname+'?token='+token);
+    var pl2=p.payload;
+    var cat=null; cfg.cash.categories.forEach(function(c){ if(c.name===pl2.category) cat=c; });
+    if(!cat) return {ok:false, errors:['That category is not available any more — reload and pick again.']};
+    var req=pl2.requestRef?demoByRef(pl2.requestRef):null;
+    var judged=demoJudge(pl2,cat,ceiling,req);
+    var flags=judged.flags.slice();
+    if(isLocumCat(pl2.category)){
+      if(pl2.claimRef) flags.push('[demo] Linked claim '+pl2.claimRef+' treated as APPROVED for £'+money(pl2.amount)+'.');
+      else flags.push('No claim linked — ask the locum to submit a claim so validation and duplicate-day checks run.');
     }
-    return {ok:true, ref:ref, status:pending?'PENDING':'RECORDED', threshold:t, _demoToken:pending?token:null};
+    var pending=judged.pending||flags.length>0;
+    var ref2='CX-'+Math.random().toString(36).slice(2,7).toUpperCase();
+    var token2='demo'+Math.random().toString(36).slice(2,9);
+    var entry={_kind:'entry', ref:ref2, status:pending?'PENDING':'RECORDED', flags:flags,
+      claim:pl2.claimRef?{ref:pl2.claimRef, status:'APPROVED', locumName:pl2.person||'the locum', totalAmount:pl2.amount}:null,
+      repaidAt:''};
+    for(var k in pl2) if(k!=='receipt') entry[k]=pl2[k];
+    entry.receipt=pl2.receipt||'';
+    demoStore(token2,entry);
+    var idx2=demoRefIndex(); idx2[ref2]=token2; demoStore('cashdemo_refs',idx2);
+    if(req&&req.status==='APPROVED'&&!req.linkedCashRef){ req.linkedCashRef=ref2; demoStore(demoRefIndex()[req.ref],req); }
+    if(pending) console.log('%c[DEMO] Head-office review link:', 'color:#0D47A1;font-weight:bold', location.pathname+'?token='+token2);
+    return {ok:true, ref:ref2, status:pending?'PENDING':'RECORDED', flags:flags};
   }
   if(method==='GET' && p.action==='cashentry'){
-    var c=demoLoad(p.token);
-    if(!c) return {ok:false, code:'invalid'};
-    if(c.status==='ACKNOWLEDGED'||c.status==='QUERIED') return {ok:false, code:'processed', ref:c.ref, status:c.status};
-    return {ok:true, entry:c};
+    var o=demoLoad(p.token);
+    if(!o) return {ok:false, code:'invalid'};
+    if(o._kind==='req'){
+      if(o.status!=='REQUESTED') return {ok:false, code:'processed', ref:o.ref, status:o.status};
+      return {ok:true, view:'decide', request:o};
+    }
+    if(o.status==='ACKNOWLEDGED'||o.status==='QUERIED'){
+      if(o.status==='ACKNOWLEDGED'&&o.paidFrom==='pocket'&&!o.repaidAt) return {ok:true, view:'repay', entry:o};
+      return {ok:false, code:'processed', ref:o.ref, status:o.status, repaidAt:o.repaidAt};
+    }
+    return {ok:true, view:'ack', entry:o};
   }
   if(method==='POST' && (p.action==='ack'||p.action==='query')){
     var c2=demoLoad(p.token);
-    if(!c2) return {ok:false, code:'invalid'};
+    if(!c2||c2._kind!=='entry') return {ok:false, code:'invalid'};
     if(c2.status==='ACKNOWLEDGED'||c2.status==='QUERIED') return {ok:false, code:'processed', ref:c2.ref, status:c2.status};
-    c2.status = p.action==='ack' ? 'ACKNOWLEDGED' : 'QUERIED';
-    c2.decidedAt = new Date().toISOString();
-    demoStore(p.token, c2);
-    return {ok:true, ref:c2.ref, status:c2.status};
+    if(p.action==='ack'){
+      var settles=c2.claim&&c2.claim.status==='APPROVED';
+      if(settles&&!p.by) return {ok:false, message:'Your name is required — acknowledging this marks claim '+c2.claim.ref+' as paid in cash.'};
+      c2.status='ACKNOWLEDGED'; c2.decidedAt=new Date().toISOString();
+      demoStore(p.token,c2);
+      return {ok:true, ref:c2.ref, status:'ACKNOWLEDGED', settledClaim:settles?c2.claim.ref:''};
+    }
+    if(!p.reason) return {ok:false, message:'A reason is required.'};
+    c2.status='QUERIED'; c2.decidedAt=new Date().toISOString();
+    demoStore(p.token,c2);
+    return {ok:true, ref:c2.ref, status:'QUERIED'};
+  }
+  if(method==='POST' && p.action==='cashrepay'){
+    var c3=demoLoad(p.token);
+    if(!c3||c3._kind!=='entry') return {ok:false, code:'invalid'};
+    if(c3.paidFrom!=='pocket') return {ok:false, message:'This entry was not paid from anyone’s pocket.'};
+    if(c3.status!=='ACKNOWLEDGED') return {ok:false, message:'Acknowledge the entry first, then mark it repaid.'};
+    if(c3.repaidAt) return {ok:false, code:'processed', ref:c3.ref, status:'REPAID'};
+    if(!p.by) return {ok:false, message:'Your name is required.'};
+    c3.repaidAt=new Date().toISOString(); c3.repaidBy=p.by;
+    demoStore(p.token,c3);
+    return {ok:true, ref:c3.ref, repaidAt:c3.repaidAt};
+  }
+  if(method==='POST' && (p.action==='cashapprove'||p.action==='cashreject')){
+    var q2=demoLoad(p.token);
+    if(!q2||q2._kind!=='req') return {ok:false, code:'invalid'};
+    if(q2.status!=='REQUESTED') return {ok:false, code:'processed', ref:q2.ref, status:q2.status};
+    if(!p.by) return {ok:false, message:'Your name is required.'};
+    if(p.action==='cashapprove'){
+      q2.status='APPROVED'; q2.decidedBy=p.by; q2.decidedAt=new Date().toISOString();
+      q2.cap=(p.cap==null||p.cap==='')?null:Number(p.cap);
+      demoStore(p.token,q2);
+      return {ok:true, ref:q2.ref, status:'APPROVED', cap:q2.cap};
+    }
+    if(!p.reason) return {ok:false, message:'A reason is required.'};
+    q2.status='REJECTED'; q2.decidedBy=p.by; q2.decidedAt=new Date().toISOString(); q2.decideReason=p.reason;
+    demoStore(p.token,q2);
+    return {ok:true, ref:q2.ref, status:'REJECTED'};
   }
   return {ok:false, message:'Unknown action'};
 }
