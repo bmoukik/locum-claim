@@ -63,6 +63,15 @@ below in this box is production fact, not plan.
   CLM-0B718 submitted through the hosted page → validator + locum emails
   arrived. Labels exist under "Crest apps/" on bmoukik's Gmail (WRONG account
   now — recreate labels + 5 to:-filters on moukik.cyber, still manual).
+- **Repo consolidation (20 Jul 2026):** `bmoukik/crest-locum-payments` (the
+  private June–July prototype, `LOC-2026-NNNN` refs, own backend/web/) is
+  SUPERSEDED — this repo is the single locum repo. Ported before archiving:
+  `appsscript.json` (manifest), a rewritten `tests/test_logic.js` (59 Node
+  checks against the LIVE Code.gs — mocked GAS services, full claim lifecycle,
+  bank-visibility + self-approval invariants; run before any Code.gs commit),
+  and the README architecture rationale. The prototype's own tests/UI targeted
+  its dead backend and were deliberately not carried over; the old repo stays
+  archived (not deleted) as history.
 - **QR posters:** https://bmoukik.github.io/locum-claim/posters.html — 25 A4
   pages (one per branch + generic). Each QR = `index.html?ph=<branch>` which
   pre-selects the pharmacy + loads its validators (still changeable). QRs are
@@ -78,6 +87,8 @@ below in this box is production fact, not plan.
 | `admin.html` | Demo/design preview of the admin console | Demo only — the live console is the private admin deployment |
 | `AdminConsole.html` | The REAL admin console (pasted in Apps Script as HTML file `Admin`) | **LIVE** behind Google sign-in + allowlist + PIN |
 | `Code.gs` | The whole backend (spec: `BACKEND_SPEC.md`) | **DEPLOYED** — repo copy is source of truth, editor is paste target |
+| `appsscript.json` | Apps Script manifest (V8, Europe/London, public web-app defaults) | Paste alongside Code.gs; admin deployment overrides access per-deployment |
+| `tests/test_logic.js` | 59 Node checks on the live Code.gs (mocked GAS) | Run `node tests/test_logic.js` before any Code.gs commit |
 | `posters.html` | Printable QR posters, one per branch | **LIVE** |
 | `stock-transfer.html` | Inter-branch stock transfer note | Frontend complete, demo; **ON HOLD** |
 
