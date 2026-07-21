@@ -320,6 +320,31 @@ function baseCash(over) {
   }, over || {});
 }
 function cashRow(env, ref) { return env.s.findByRef_('Cash Log', env.s.CASH_COLS, ref); }
+// pre-§6b rows (email-only, no raised claim) can no longer be created through
+// the API — insert them directly to prove the protections still cover them
+let legacyN = 0;
+function legacyLocumRow(env, over) {
+  const s = env.s;
+  const row = {};
+  s.CASH_COLS.forEach((k) => { row[k] = ''; });
+  Object.assign(row, {
+    ref: 'CX-LEG' + (++legacyN), at: new Date().toISOString(), status: 'PENDING',
+    pharmacy: 'High Street', manager: 'Test Manager', category: 'Locum / casual staff (cash)',
+    amount: 100, date: '2026-07-10', reason: 'legacy row', fromTill: true, paidFrom: 'till',
+    person: 'Jane Locum', role: 'Dispenser', rtw: true, locumEmail: 'jane@test.co',
+    flagsJson: JSON.stringify(['No claim linked — ask the locum to submit a claim so validation and duplicate-day checks run.']),
+  }, over || {});
+  env.dataSheets()['Cash Log'].appendRow(s.CASH_COLS.map((k) => row[k]));
+  return row;
+}
+function behalfCash(over) {
+  return baseCash(Object.assign({
+    category: 'Locum / casual staff (cash)', amount: 120, reason: 'Sat cover',
+    person: 'Jane Locum', role: 'Dispenser', rtw: true,
+    locumEmail: 'jane@test.co', locumPhone: '07123456789', validatorName: 'Sam Okafor',
+    locumDays: [{ date: '2026-07-18', hours: 8 }, { date: '2026-06-30', hours: 4 }],
+  }, over || {}));
+}
 function cashToken(env, ref) {
   const rows = env.dataSheets().Tokens._rows.slice(1);
   const m = rows.filter((r) => r[2] === ref);
@@ -461,15 +486,16 @@ function cashToken(env, ref) {
     rtw: true, claimRef: 'CLM-ZZZZZ', reason: 'cash', date: '2026-07-18' }));
   ok(dangling.ok === false && dangling.errors.some((e2) => /not found/.test(e2)),
     'unknown claim ref is a hard error — a typo must not orphan the payment');
-  ok(s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 10, person: 'X', role: 'Driver',
-    rtw: true, reason: 'cash', date: '2026-07-17' })).ok === false, 'locum entry without claim ref needs the locum email');
+  const noDays = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 10, person: 'X', role: 'Driver',
+    rtw: true, reason: 'cash', date: '2026-07-17' }));
+  ok(noDays.ok === false && noDays.errors.some((e2) => /days they worked/.test(e2)),
+    'locum entry without a claim needs the worked days — the branch fills them in');
 }
 {
-  // cash first: entry logged before any claim exists → later claim is flagged live
+  // LEGACY cash-first row (pre-§6b, email only, no raised claim): a later
+  // claim still gets the live flag and accounts can still settle it as cash
   const env = build(); const { s, sent } = env;
-  const r = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 120,
-    person: 'Jane Locum', role: 'Dispenser', rtw: true, locumEmail: 'JANE@test.co', reason: 'Sat cover cash' }));
-  ok(r.flags.some((f) => /No claim linked/.test(f)), 'cash-first entry flagged: no claim linked');
+  const r = legacyLocumRow(env, { amount: 120, reason: 'Sat cover cash' });
   const claim = s.submit_(basePl());
   const vView = s.claimGet_(tokenFor(env, claim.ref, 'validator'));
   ok(vView.flags.some((f) => f.indexOf('Cash payment ' + r.ref) === 0), 'later claim shows live cash flag to validator');
@@ -487,8 +513,7 @@ function cashToken(env, ref) {
 // --- back-link at settle: the till record gets the claim ref ----------------
 {
   const env = build(); const { s } = env;
-  const cash = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 275,
-    person: 'Jane Locum', role: 'Dispenser', rtw: true, locumEmail: 'jane@test.co', reason: 'cash first' }));
+  const cash = legacyLocumRow(env, { amount: 275, reason: 'cash first' });
   const claim = s.submit_(basePl());
   s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
   s.settle_({ token: tokenFor(env, claim.ref, 'accounts'), action: 'paid', by: 'Pat', method: 'cash' });
@@ -498,10 +523,8 @@ function cashToken(env, ref) {
 }
 {
   const env = build(); const { s } = env;
-  const c1 = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 100,
-    person: 'Jane Locum', role: 'Dispenser', rtw: true, locumEmail: 'jane@test.co', reason: 'week 1' }));
-  const c2 = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 175,
-    person: 'Jane Locum', role: 'Dispenser', rtw: true, locumEmail: 'jane@test.co', reason: 'week 2', date: '2026-07-19' }));
+  const c1 = legacyLocumRow(env, { amount: 100, reason: 'week 1' });
+  const c2 = legacyLocumRow(env, { amount: 175, reason: 'week 2', date: '2026-07-19' });
   const claim = s.submit_(basePl());
   s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
   s.settle_({ token: tokenFor(env, claim.ref, 'accounts'), action: 'paid', by: 'Pat', method: 'cash' });
@@ -518,12 +541,12 @@ function cashToken(env, ref) {
 // --- plain locum ack needs a name; mismatch never auto-settles --------------
 {
   const env = build(); const { s } = env;
-  const r = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 120,
-    person: 'Jane Locum', role: 'Dispenser', rtw: true, locumEmail: 'jane@test.co', reason: 'cash, no claim yet' }));
+  const r = s.cashLog_(behalfCash());
   ok(s.cashDecide_({ token: cashToken(env, r.ref), action: 'ack' }).ok === false,
-    'ack of an unlinked locum entry still requires a typed name — it pays a person');
+    'ack of a locum entry requires a typed name — it pays a person');
   const done = s.cashDecide_({ token: cashToken(env, r.ref), action: 'ack', by: 'HO Person' });
-  ok(done.ok && done.settledClaim === '' && cashRow(env, r.ref).ackBy === 'HO Person', 'named ack recorded, nothing settled');
+  ok(done.ok && done.settledClaim === '' && cashRow(env, r.ref).ackBy === 'HO Person',
+    'named ack recorded; raised claim still awaiting its validator, nothing settled yet');
 }
 {
   const env = build(); const { s } = env;
@@ -562,14 +585,13 @@ function cashToken(env, ref) {
     constructor(...a) { a.length ? super(...a) : super(WED); }
     static now() { return WED; }
   };
-  const nudge = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 120,
-    person: 'Jane Locum', role: 'Dispenser', rtw: true, locumEmail: 'jane@test.co', reason: 'Sat cover' }));
-  const esc = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 90,
-    person: 'Amir Khan', role: 'Driver', rtw: true, locumEmail: 'amir@test.co', reason: 'Deliveries', date: '2026-07-14' }));
-  // nudge-age entry: Monday 09:00 → 2 working days by Wednesday (= reminderDays)
-  s.writeCell_('Cash Log', cashRow(env, nudge.ref)._row, s.CASH_COLS, 'at', '2026-07-20T09:00:00Z');
-  // escalate-age entry: previous Wednesday → 5 working days (≥ escalateDays 4)
-  s.writeCell_('Cash Log', cashRow(env, esc.ref)._row, s.CASH_COLS, 'at', '2026-07-15T09:00:00Z');
+  // legacy email-only rows are the only state the chase still applies to —
+  // the on-behalf path raises a claim at log time, so new entries never lack one
+  // nudge-age: Monday 09:00 → 2 working days by Wednesday (= reminderDays);
+  // escalate-age: previous Wednesday → 5 working days (≥ escalateDays 4)
+  const nudge = legacyLocumRow(env, { amount: 120, reason: 'Sat cover', at: '2026-07-20T09:00:00Z' });
+  const esc = legacyLocumRow(env, { amount: 90, reason: 'Deliveries', person: 'Amir Khan', role: 'Driver',
+    locumEmail: 'amir@test.co', date: '2026-07-14', at: '2026-07-15T09:00:00Z' });
   sent.length = 0;
   s.remindAndEscalate();
   ok(sent.some((m) => m.to === 'jane@test.co' && /submit a claim/.test(m.subject)), 'locum nudged to submit a claim');
@@ -580,14 +602,89 @@ function cashToken(env, ref) {
   ok(sent.length === n, 'second run sends nothing — max one nudge + one escalation');
 
   // once the locum has submitted, chasing them stops
-  const late = s.cashLog_(baseCash({ category: 'Locum / casual staff (cash)', amount: 60,
-    person: 'Jane Locum', role: 'Dispenser', rtw: true, locumEmail: 'jane@test.co', reason: 'More cover', date: '2026-07-13' }));
-  s.writeCell_('Cash Log', cashRow(env, late.ref)._row, s.CASH_COLS, 'at', '2026-07-15T09:00:00Z');
+  legacyLocumRow(env, { amount: 60, reason: 'More cover', date: '2026-07-13', at: '2026-07-15T09:00:00Z' });
   s.writeCell_('Cash Log', cashRow(env, nudge.ref)._row, s.CASH_COLS, 'claimRef', 'CLM-LINKED'); // silence the first
   s.submit_(basePl());
   const n2 = sent.length;
   s.remindAndEscalate();
   ok(!sent.slice(n2).some((m) => m.to === 'jane@test.co'), 'no chasing once a live claim exists for that locum');
+}
+
+// --- §6b on-behalf: the cash entry raises the claim itself ------------------
+{
+  const env = build(); const { s, sent } = env;
+  const r = s.cashLog_(behalfCash());
+  ok(r.ok && r.status === 'PENDING', 'on-behalf cash entry accepted + reviewed');
+  const entryRow = cashRow(env, r.ref);
+  const clm = s.findByRef_('Claims', s.CLAIM_COLS, entryRow.claimRef);
+  ok(!!clm && clm.status === 'SUBMITTED' && clm.origin === 'branch-cash', 'claim raised on the locum’s behalf');
+  ok(/Test Manager \(High Street\)/.test(clm.submittedBy), 'submittedBy recorded');
+  const months = JSON.parse(clm.monthsJson);
+  ok(months.length === 2 && Number(clm.totalHours) === 12 && Number(clm.totalAmount) === 120,
+    'worked days captured with the month split (July 8h + June 4h) — the P&L data');
+  ok(Number(clm.rate) === 10, 'rate derived from amount ÷ hours (£120 / 12h)');
+  ok(clm.cashEntryRef === r.ref && entryRow.claimRef === clm.ref, 'two-way link written at creation');
+  ok(r.flags.some((f) => /raised from this entry/.test(f)), 'entry flags say a claim was raised');
+  ok(sent.some((m) => m.to === 'sam@test.co' && /on behalf of Jane Locum/.test(m.body)), 'validator told who raised it');
+  ok(sent.some((m) => m.to === 'jane@test.co' && /submitted for you/.test(m.subject)), 'locum notified — fraud tripwire');
+
+  // HO reviews the entry first, validator approves after → auto-settle
+  const ack = s.cashDecide_({ token: cashToken(env, r.ref), action: 'ack', by: 'HO Person' });
+  ok(ack.ok && ack.settledClaim === '', 'ack before approval records, does not settle');
+  sent.length = 0;
+  const ap = s.decide_({ token: tokenFor(env, clm.ref, 'validator'), action: 'approve' });
+  ok(ap.ok && ap.status === 'PAID', 'validator approval auto-settles the branch-cash claim');
+  const done = s.findByRef_('Claims', s.CLAIM_COLS, clm.ref);
+  ok(done.paidMethod === 'cash' && /HO Person/.test(done.paidBy) && done.cashEntryRef === r.ref,
+    'settled with the reviewer’s name + entry ref');
+  ok(sent.some((m) => m.to === 'accounts@test.co' && /nothing to pay/.test(m.subject)), 'accounts get an FYI, not a pay request');
+  ok(sent.some((m) => m.to === 'jane@test.co' && /approved and settled/.test(m.subject)), 'locum told: approved, already paid');
+}
+{
+  // approval first, HO review after → the existing ack path settles
+  const env = build(); const { s, sent } = env;
+  const r = s.cashLog_(behalfCash());
+  const clmRef = cashRow(env, r.ref).claimRef;
+  sent.length = 0;
+  const ap = s.decide_({ token: tokenFor(env, clmRef, 'validator'), action: 'approve' });
+  ok(ap.status === 'APPROVED', 'approval before HO review leaves the claim APPROVED');
+  const aMail = sent.filter((m) => m.to === 'accounts@test.co')[0];
+  ok(aMail && /to be settled in cash/.test(aMail.subject) && /Do not pay by bank/i.test(aMail.body),
+    'accounts email: cash-settlement note, no bank instruction');
+  ok(s.settle_({ token: tokenFor(env, clmRef, 'accounts'), action: 'paid', by: 'Pat' }).ok === false,
+    'bankless claim cannot be paid by bank');
+  const ack = s.cashDecide_({ token: cashToken(env, r.ref), action: 'ack', by: 'HO Person' });
+  ok(ack.ok && ack.settledClaim === clmRef, 'HO review then settles the approved claim');
+}
+{
+  // no email on file: claim still raised, nothing sent to a blank address
+  const env = build(); const { s, sent } = env;
+  const r = s.cashLog_(behalfCash({ locumEmail: '' }));
+  ok(r.ok && r.flags.some((f) => /No email on file/.test(f)), 'no-email locum accepted + flagged');
+  ok(!sent.some((m) => !m.to), 'nothing ever sent to a blank address');
+  const r2 = s.cashLog_(behalfCash({ locumEmail: '', reason: 'again', date: '2026-07-19', amount: 60,
+    locumDays: [{ date: '2026-07-18', hours: 6 }] }));
+  ok(r2.ok && r2.flags.some((f) => /Same days as claim/.test(f)), 'duplicate day caught by NAME when no email');
+  ok(s.cashLog_(behalfCash({ validatorName: 'Inactive Val', date: '2026-07-16' })).ok === false,
+    'inactive approver rejected on the on-behalf path');
+  ok(s.cashLog_(behalfCash({ locumEmail: 'sam@test.co', date: '2026-07-15' })).ok === false,
+    'approver’s email = locum’s email blocked on-behalf too');
+}
+
+// --- §6b HO-pays: branch-raised claim, accounts pay by bank -----------------
+{
+  const env = build(); const { s, sent } = env;
+  ok(s.branchClaim_(behalfCash({ rate: 15 })).ok === false, 'HO-pays needs the locum’s bank details');
+  const q = s.branchClaim_(behalfCash({ rate: 15, sort: '071234', acct: '01235678', acct2: '01235678', bankName: 'J Locum' }));
+  ok(q.ok && q.totalAmount === 180, 'HO-pays claim: 12h × £15 = £180');
+  const clm = s.findByRef_('Claims', s.CLAIM_COLS, q.ref);
+  ok(clm.origin === 'branch-hopays' && String(clm.accountNumber) === '01235678', 'bank details stored for accounts');
+  sent.length = 0;
+  s.decide_({ token: tokenFor(env, q.ref, 'validator'), action: 'approve' });
+  const aMail = sent.filter((m) => m.to === 'accounts@test.co')[0];
+  ok(aMail && /ready to pay/.test(aMail.subject) && aMail.body.indexOf('01235678') >= 0, 'accounts asked to pay by bank');
+  const paid = s.settle_({ token: tokenFor(env, q.ref, 'accounts'), action: 'paid', by: 'Pat' });
+  ok(paid.ok && s.findByRef_('Claims', s.CLAIM_COLS, q.ref).paidMethod === 'bank', 'paid by bank as normal');
 }
 
 // --- admin save with the category matrix ------------------------------------

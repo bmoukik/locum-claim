@@ -365,7 +365,9 @@ Otherwise it is `RECORDED` (self-acknowledged, final, still in the ledger).
 ### Records
 
 - `GET ?action=cashmeta` → `{ok, pharmacies:[active names],
-  categories:[{name, policy, cap}], reviewCeiling}`
+  categories:[{name, policy, cap}], reviewCeiling,
+  validators:{pharmacy:[names]}}` — validator names (never emails) feed the
+  on-behalf approver picker (§6b).
 - `POST {action:'cashlog', payload}` → `{ok, ref, status:'RECORDED'|'PENDING',
   flags:[]}` — `ref`: `CX-` + 5 chars. Payload adds to the phase-1 shape:
   `paidFrom:'till'|'pocket'|'invoice'`, `payerEmail` (pocket only, optional —
@@ -426,17 +428,45 @@ protection are bypassed at the till.
   entry's `claimRef` is back-filled** when exactly one unlinked locum entry
   matches the email — the link then reads both ways from sheet data alone
   (ambiguous matches stay flag-only for a human to resolve).
-- **Chasing the missing claim (the cron, §9):** a locum-category entry with
-  `locumEmail` and no `claimRef` means a payment whose **worked days/hours are
-  not on record anywhere** — the cash entry deliberately captures only the
-  payment (one date, amount, who); the claim is the sole record of days ×
-  hours × rate and its per-month split. So the weekday trigger chases it on
-  the same cadence as validator chasing: at `locum.reminderDays` the locum is
-  emailed to submit a claim (`claimChasedAt`), at `locum.escalateDays` it
-  escalates to `email.locumHandling` (`claimEscalatedAt`), max one of each.
-  Chasing stops the moment any non-REJECTED claim from that email exists.
-  Worked days/hours are **never** collected on the cash form itself — two
-  competing records would drift, and it would bypass the validator.
+- **Chasing the missing claim (the cron, §9) — LEGACY ROWS ONLY:** since §6b,
+  a new locum entry always carries a claim (linked or raised on the spot), so
+  the unlinked email-only state can no longer be created. Rows from before the
+  migration can still be in it, and for those the weekday trigger chases on
+  the validator cadence: at `locum.reminderDays` the locum is emailed to
+  submit a claim (`claimChasedAt`), at `locum.escalateDays` it escalates to
+  `email.locumHandling` (`claimEscalatedAt`), max one of each, stopping the
+  moment any non-REJECTED claim from that email exists.
+
+### 6b. Branch-raised claims — the locum can't or won't submit
+
+If the locum could have submitted a claim, the payment wouldn't be coming
+through this route — so the branch fills in the worked days at the counter
+and **a claim is raised on the locum's behalf**. The Claims tab stays the
+single record of days × hours × rate (the P&L month split); a validator still
+approves; nothing is duplicated onto the cash row.
+
+- `POST {action:'cashlog', ...}` with a locum category and **no `claimRef`**
+  now REQUIRES `locumDays:[{date:'YYYY-MM-DD', hours}]` + `validatorName`
+  (`locumEmail`/`locumPhone` optional). The server raises a claim
+  (`origin='branch-cash'`, `submittedBy` = manager + pharmacy, rate derived as
+  amount ÷ total hours, `cashEntryRef` = the entry, entry `claimRef` = the
+  claim) before writing the entry — any claim-side validation failure stops
+  the whole log. Self-approval block and duplicate-days flags still run
+  (duplicates match by email when present, by name otherwise).
+- `POST {action:'branchclaim', payload}` — the **head-office-pays** route: no
+  cash moves at the branch. Same identity/days payload plus `rate` and the
+  locum's bank details (required — accounts must be able to pay). Creates the
+  claim (`origin='branch-hopays'`), validator approves, accounts pay by bank
+  exactly like a self-submitted claim.
+- **Fraud tripwire:** whenever a claim is raised in someone's name, the locum
+  is emailed about it (when an address is on file). No email → a stored flag
+  warns receipts can't reach them; blank addresses are never sent to.
+- **Settlement order is symmetric for branch-cash:** HO ack first + validator
+  approval second → **approval auto-settles** the claim as PAID/cash using the
+  ack's typed name (the approval was the last human in the chain). Approval
+  first → the ack settles as before. While unsettled, the accounts email for a
+  bankless claim says "to be settled in cash — do not pay by bank", and
+  `settle_` refuses `method` bank on a claim with no account number.
 - **P&L rule (for the future pipeline — do not double-count):** the **Claims
   tab is the locum cost record** — it has the per-month split
   (`monthsJson`/`totalHours`/`totalAmount`), and a cash-settled claim keeps
@@ -554,7 +584,8 @@ category, estAmount, reason, notes, decidedBy, decidedAt, decideReason, cap,
 linkedCashRef`
 
 Claims — appended at the end: `paidMethod` (`bank` | `cash`), `cashEntryRef`
-(the CX ref that settled it, when known).
+(the CX ref that settled it, when known), `submittedBy` (who raised it, for
+branch-raised claims), `origin` (`locum` | `branch-cash` | `branch-hopays`).
 
 Status values — Claims: `SUBMITTED → APPROVED → PAID`, plus `REJECTED` (by
 validator) and `RAISED` (by accounts, returns to `SUBMITTED`-like handling).

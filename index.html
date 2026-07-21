@@ -440,16 +440,19 @@ function renderAccounts(token,c,errMsg){
     '<div class="stamp">Approved by <b>'+esc(a.by||'the validator')+'</b>'+(when?' on '+esc(when):'')+'</div>'+
     claimSummary(c)+
     flagsBlock(c)+
-    '<h3>Where to send it</h3>'+
-    '<div class="bank">'+
-      '<table class="kv" style="margin:0">'+
-      '<tr><td>Name on account</td><td><b>'+esc(c.bank.name)+'</b></td></tr>'+
-      '<tr><td>Sort code</td><td><span class="num">'+esc(c.bank.sort)+'</span></td></tr>'+
-      '<tr><td>Account number</td><td><span class="num">'+esc(c.bank.acct)+'</span></td></tr>'+
-      '<tr><td>Amount</td><td><b>£'+money(c.split.totalAmount)+'</b></td></tr>'+
-      '<tr><td>Reference</td><td><b>'+esc(c.ref)+'</b></td></tr>'+
-      '</table>'+
-    '</div>'+
+    (c.bank&&c.bank.acct
+      ? '<h3>Where to send it</h3>'+
+        '<div class="bank">'+
+        '<table class="kv" style="margin:0">'+
+        '<tr><td>Name on account</td><td><b>'+esc(c.bank.name)+'</b></td></tr>'+
+        '<tr><td>Sort code</td><td><span class="num">'+esc(c.bank.sort)+'</span></td></tr>'+
+        '<tr><td>Account number</td><td><span class="num">'+esc(c.bank.acct)+'</span></td></tr>'+
+        '<tr><td>Amount</td><td><b>£'+money(c.split.totalAmount)+'</b></td></tr>'+
+        '<tr><td>Reference</td><td><b>'+esc(c.ref)+'</b></td></tr>'+
+        '</table>'+
+        '</div>'
+      // branch-cash claims carry no bank details — they settle via the cash log
+      : '<div class="banner info">No bank details on this claim — it is to be settled in cash at the branch (see the flags for the cash entry). Do not send a bank transfer; tick "paid in cash" below once it is right, or send it back.</div>')+
     '<label>Your name</label><input type="text" id="a_by" autocomplete="name">'+
     '<p class="hint">Recorded against the payment, so we know who sent it.</p>'+
     '<div class="check"><input type="checkbox" id="a_cash"><span>Paid in cash at the branch — a cash-log entry covers this, do not send a bank transfer</span></div>'+
@@ -472,9 +475,12 @@ function renderAccounts(token,c,errMsg){
   document.getElementById('paidbtn').onclick=function(){
     var by=document.getElementById('a_by').value.trim();
     if(!by) return renderAccounts(token,c,'Put your name in before marking it paid — the payment is recorded against it.');
+    var cashTick=document.getElementById('a_cash').checked;
+    if(!cashTick && !(c.bank&&c.bank.acct))
+      return renderAccounts(token,c,'This claim has no bank details — it can only be settled as paid in cash (tick the box), or sent back.');
     try{ localStorage.setItem('crest_accounts_name', by); }catch(e){}
     var extra={by:by};
-    if(document.getElementById('a_cash').checked) extra.method='cash';
+    if(cashTick) extra.method='cash';
     settle(token,'paid',extra,c);
   };
   document.getElementById('raisebtn').onclick=function(){

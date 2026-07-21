@@ -111,7 +111,11 @@ var CLAIM_COLS = ['ref', 'submittedAt', 'status', 'locumName', 'locumEmail', 'lo
   'raisedBy', 'raisedTo', 'raisedReason', 'raisedAt', 'remindedAt', 'escalatedAt',
   // appended for the cash-settlement linkage — never reorder the columns above,
   // deployed sheets are migrated by appending (migrateCash_)
-  'paidMethod', 'cashEntryRef'];
+  'paidMethod', 'cashEntryRef',
+  // who raised it: locum themselves, or the branch on their behalf (spec §6b)
+  'submittedBy', 'origin'];
+var MONTHS_ = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
 var CASH_COLS = ['ref', 'at', 'status', 'pharmacy', 'manager', 'category', 'amount', 'date', 'reason', 'fromTill',
   'receiptUrl', 'notes', 'person', 'role', 'gphc', 'rtw', 'ackAt', 'queryReason',
   // appended for the record/request model — same append-only rule as above
@@ -229,6 +233,7 @@ function doPost(e) {
     if (a === 'approve' || a === 'reject') return out_(decide_(p));
     if (a === 'paid' || a === 'raise') return out_(settle_(p));
     if (a === 'cashlog') return out_(cashLog_(p.payload));
+    if (a === 'branchclaim') return out_(branchClaim_(p.payload));
     if (a === 'ack' || a === 'query') return out_(cashDecide_(p));
     if (a === 'cashrequest') return out_(cashRequest_(p.payload));
     if (a === 'cashapprove' || a === 'cashreject') return out_(cashReqDecide_(p));
@@ -416,6 +421,7 @@ function submit_(pl) {
   row.totalHours = totalHours; row.totalAmount = totalAmount;
   row.bankName = pl.bankName; row.sortCode = pl.sort; row.accountNumber = pl.acct;
   row.notes = pl.notes || ''; row.flagsJson = JSON.stringify(flags);
+  row.origin = 'locum';
   sheet_('Claims').appendRow(CLAIM_COLS.map(function (k) { return row[k]; }));
 
   var vtok = mintToken_('claim', ref, 'validator');
@@ -431,6 +437,133 @@ function submit_(pl) {
     v.name + ' has been asked to validate it. You will get an email when it is approved, and another when the money is sent.');
 
   return { ok: true, ref: ref, total: money_(totalAmount), hours: totalHours, validator: v.name };
+}
+
+// ---------------------------------------------------------------------------
+// BRANCH-RAISED LOCUM CLAIMS (spec §6b)
+// A manager/validator raises the claim when the locum can't or won't submit —
+// the branch fills the worked days at the counter instead of chasing the
+// locum afterwards. The claim stays the single record of days × hours × rate
+// (the P&L month split); validation still runs through a validator.
+// Two routes: 'branch-cash' (till cash already paid — created from a cash-log
+// entry) and 'branch-hopays' (head office pays the locum by bank).
+// ---------------------------------------------------------------------------
+function parseLocumDays_(list) {
+  var byMonth = {}, order = [], totalHours = 0, dayKeys = [];
+  (list || []).forEach(function (d) {
+    var m = String(d.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    var hh = Number(d.hours);
+    if (!m || Number(m[2]) < 1 || Number(m[2]) > 12 || !(hh > 0 && hh <= 24)) return;
+    var label = MONTHS_[Number(m[2]) - 1] + ' ' + m[1];
+    if (!byMonth[label]) { byMonth[label] = { label: label, days: [], hours: {} }; order.push(label); }
+    var day = Number(m[3]);
+    if (byMonth[label].hours[String(day)]) return; // same day listed twice: keep first
+    byMonth[label].days.push(day); byMonth[label].hours[String(day)] = hh;
+    totalHours += hh; dayKeys.push(label + '|' + day);
+  });
+  var months = order.map(function (l) {
+    byMonth[l].days.sort(function (a, b) { return a - b; });
+    return byMonth[l];
+  });
+  return { months: months, totalHours: totalHours, dayKeys: dayKeys };
+}
+
+// opts: {origin, rate, totalAmount, bank:{name,sort,acct}|null, cashRef}
+function branchClaimCore_(pl, c, opts) {
+  var errs = [];
+  if (!pl.manager) errs.push('Your name');
+  if (!pl.pharmacy) errs.push('Pharmacy');
+  if (!pl.person) errs.push('The locum’s name');
+  if (!pl.role) errs.push('Role');
+  if (pl.role === 'Pharmacist' && !/^\d{7}$/.test(pl.gphc || '')) errs.push('GPhC number (7 digits)');
+  if (!pl.rtw) errs.push('Right-to-work confirmation');
+  if (pl.locumEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pl.locumEmail)) errs.push('A valid email for the locum (or leave it blank)');
+  var v = null;
+  if (!pl.validatorName) errs.push('Who should approve this');
+  else {
+    v = c.validators.filter(function (x) { return x.pharmacy === pl.pharmacy && x.name === pl.validatorName && x.active; })[0];
+    if (!v) errs.push('That approver is not available for ' + pl.pharmacy + ' — reload and pick again.');
+  }
+  if (v && pl.locumEmail && v.email.toLowerCase().trim() === String(pl.locumEmail).toLowerCase().trim())
+    errs.push('The approver’s email is the locum’s own — someone else has to approve.');
+  var parsed = parseLocumDays_(pl.locumDays);
+  if (!parsed.dayKeys.length) errs.push('At least one worked day with hours');
+  if (errs.length) return { ok: false, errors: errs };
+
+  // duplicate-days tripwire: by email when we have one, else by name — the
+  // branch path often has no email, and an advisory flag beats a blind spot
+  var flags = [];
+  var email = String(pl.locumEmail || '').toLowerCase();
+  var mine = rows_('Claims', CLAIM_COLS).filter(function (r) {
+    if (r.status === 'REJECTED') return false;
+    if (email) return String(r.locumEmail).toLowerCase() === email;
+    return String(r.locumName).toLowerCase().trim() === String(pl.person).toLowerCase().trim();
+  });
+  var dup = {};
+  mine.forEach(function (r) {
+    var theirs = [];
+    try { JSON.parse(r.monthsJson || '[]').forEach(function (m) { m.days.forEach(function (d) { theirs.push(m.label + '|' + d); }); }); } catch (e) { }
+    var overlap = theirs.filter(function (k) { return parsed.dayKeys.indexOf(k) >= 0; });
+    if (overlap.length) dup[r.ref] = overlap;
+  });
+  Object.keys(dup).forEach(function (ref) {
+    var pretty = dup[ref].map(function (k) { var s = k.split('|'); return s[1] + ' ' + s[0].split(' ')[0]; }).join(', ');
+    flags.push('Same days as claim ' + ref + ', already sent in: ' + pretty + '. Check this is not a repeat.');
+  });
+  flags.push('Submitted by ' + pl.manager + ' (' + pl.pharmacy + ') on the locum’s behalf' +
+    (opts.origin === 'branch-cash' ? ' — already paid in cash, entry ' + opts.cashRef + '.' : ' — for head office to pay.'));
+  if (!email) flags.push('No email on file for this locum — they will not receive receipts. Double-check the name and days with them.');
+
+  var ref = 'CLM-' + Utilities.getUuid().replace(/-/g, '').slice(0, 5).toUpperCase();
+  var now = new Date().toISOString();
+  var row = {};
+  CLAIM_COLS.forEach(function (k) { row[k] = ''; });
+  row.ref = ref; row.submittedAt = now; row.status = 'SUBMITTED';
+  row.locumName = pl.person; row.locumEmail = email; row.locumPhone = pl.locumPhone || '';
+  row.role = pl.role; row.roleOther = pl.roleOther || ''; row.gphc = pl.gphc || ''; row.rtw = true;
+  row.pharmacy = pl.pharmacy; row.validatorName = v.name; row.validatorEmail = v.email;
+  row.rate = opts.rate; row.monthsJson = JSON.stringify(parsed.months);
+  row.totalHours = parsed.totalHours; row.totalAmount = opts.totalAmount;
+  if (opts.bank) { row.bankName = opts.bank.name; row.sortCode = opts.bank.sort; row.accountNumber = opts.bank.acct; }
+  row.notes = pl.notes || ''; row.flagsJson = JSON.stringify(flags);
+  row.submittedBy = pl.manager + ' (' + pl.pharmacy + ')'; row.origin = opts.origin;
+  if (opts.origin === 'branch-cash' && opts.cashRef) row.cashEntryRef = opts.cashRef;
+  sheet_('Claims').appendRow(CLAIM_COLS.map(function (k) { return row[k]; }));
+
+  var vtok = mintToken_('claim', ref, 'validator');
+  sendMail_(v.email, 'Locum claim ' + ref + ' — waiting for your approval',
+    pl.manager + ' at ' + pl.pharmacy + ' submitted claim ' + ref + ' on behalf of ' + pl.person + '.\n' +
+    parsed.totalHours + ' hours = £' + money_(opts.totalAmount) + '.\n' +
+    (flags.length ? '\nCheck these before you go on:\n- ' + flags.join('\n- ') + '\n' : '') +
+    '\nReview and approve or reject:\n' + webUrl_() + '?token=' + vtok +
+    (opts.origin === 'branch-cash'
+      ? '\n\nThe cash has already been paid at the branch; your approval confirms the work behind it.'
+      : '\n\nNothing is paid until you approve; accounts pay after your approval.'));
+  // fraud tripwire: the locum hears about any claim raised in their name
+  sendMail_(email, 'A claim was submitted for you at ' + COMPANY,
+    pl.manager + ' at ' + pl.pharmacy + ' submitted payment claim ' + ref + ' on your behalf: ' +
+    parsed.totalHours + ' hours, £' + money_(opts.totalAmount) + '.\n' +
+    (opts.origin === 'branch-cash' ? 'It records the cash you were already paid.' : 'You will get an email when it is approved and when the money is sent.') +
+    '\nIf this is wrong, contact head office.');
+  return { ok: true, ref: ref, totalHours: parsed.totalHours, totalAmount: opts.totalAmount, validator: v.name, flags: flags };
+}
+
+// POST {action:'branchclaim', payload} — head office pays the locum by bank
+function branchClaim_(pl) {
+  var c = readConfig_();
+  var errs = [];
+  if (!(pl.rate > 0)) errs.push('Rate (£/hour)');
+  if (!/^\d{6}$/.test(pl.sort || '')) errs.push('Sort code (6 digits)');
+  if (!/^\d{8}$/.test(pl.acct || '')) errs.push('Account number (8 digits)');
+  if (pl.acct !== pl.acct2) errs.push('Account numbers must match');
+  if (!pl.bankName) errs.push('Account holder name');
+  if (errs.length) return { ok: false, errors: errs };
+  var parsed = parseLocumDays_(pl.locumDays);
+  var total = Math.round(pl.rate * parsed.totalHours * 100) / 100;
+  return branchClaimCore_(pl, c, {
+    origin: 'branch-hopays', rate: pl.rate, totalAmount: total,
+    bank: { name: pl.bankName, sort: pl.sort, acct: pl.acct }
+  });
 }
 
 // Live cash flags (spec §6a): computed at view time, never stored — the cash
@@ -465,7 +598,8 @@ function claimView_(r, view) {
     pharmacy: r.pharmacy, company: COMPANY, validatorName: r.validatorName,
     rate: Number(r.rate), months: months,
     split: { rows: rows, totalHours: Number(r.totalHours), totalAmount: Number(r.totalAmount) },
-    flags: JSON.parse(r.flagsJson || '[]').concat(cashFlagsForClaim_(r)), notes: r.notes
+    flags: JSON.parse(r.flagsJson || '[]').concat(cashFlagsForClaim_(r)), notes: r.notes,
+    submittedBy: r.submittedBy || '', origin: r.origin || 'locum'
   };
   if (r.approvedBy) o.approval = { by: r.approvedBy, at: r.approvedAt };
   if (view === 'accounts') o.bank = { name: r.bankName, sort: String(r.sortCode), acct: String(r.accountNumber) }; // validator NEVER gets bank
@@ -511,11 +645,38 @@ function decide_(p) {
   writeCell_('Claims', r._row, CLAIM_COLS, 'status', 'APPROVED');
   writeCell_('Claims', r._row, CLAIM_COLS, 'approvedBy', r.validatorName);
   writeCell_('Claims', r._row, CLAIM_COLS, 'approvedAt', now);
+
+  // branch-cash claims: the till already paid and head office already put a
+  // name on the reviewed entry — this approval was the last human in the
+  // chain, so the claim settles as cash right here (spec §6b)
+  var settledEntry = rows_('Cash Log', CASH_COLS).filter(function (x) {
+    return isLocumCat_(x.category) && x.status === 'ACKNOWLEDGED' && x.ackBy &&
+      String(x.claimRef).toUpperCase() === String(r.ref).toUpperCase() &&
+      Math.abs(Number(x.amount) - Number(r.totalAmount)) <= 0.005;
+  })[0];
+  if (settledEntry) {
+    writeCell_('Claims', r._row, CLAIM_COLS, 'status', 'PAID');
+    writeCell_('Claims', r._row, CLAIM_COLS, 'paidBy', settledEntry.ackBy + ' — cash at ' + settledEntry.pharmacy + ' (entry ' + settledEntry.ref + ')');
+    writeCell_('Claims', r._row, CLAIM_COLS, 'paidAt', now);
+    writeCell_('Claims', r._row, CLAIM_COLS, 'paidMethod', 'cash');
+    writeCell_('Claims', r._row, CLAIM_COLS, 'cashEntryRef', settledEntry.ref);
+    sendMail_(r.locumEmail, 'Your claim ' + r.ref + ' is approved and settled',
+      r.validatorName + ' approved claim ' + r.ref + ' (£' + money_(r.totalAmount) + ').\nYou were already paid in cash at ' + settledEntry.pharmacy + ' — no bank transfer will follow; this closes the claim.');
+    sendMail_(c.emails.accounts, 'Claim ' + r.ref + ' approved — already settled in CASH, nothing to pay',
+      'Claim ' + r.ref + ' (' + r.locumName + ', £' + money_(r.totalAmount) + ') was paid in cash at ' + settledEntry.pharmacy +
+      ' (entry ' + settledEntry.ref + ', reviewed by ' + settledEntry.ackBy + ') and is now approved by ' + r.validatorName + '.\nIt is marked PAID — do not send a bank transfer.');
+    sendMail_(r.validatorEmail, 'Receipt: you approved claim ' + r.ref,
+      'For your records: you approved ' + r.ref + ' (£' + money_(r.totalAmount) + ', ' + r.locumName + ') on ' + now + '. It was settled in cash at the branch (entry ' + settledEntry.ref + ').');
+    return { ok: true, ref: r.ref, status: 'PAID', locum: r.locumName };
+  }
+
   var atok = mintToken_('claim', r.ref, 'accounts');
   var flags = JSON.parse(r.flagsJson || '[]').concat(cashFlagsForClaim_(r));
-  sendMail_(c.emails.accounts, 'Locum claim ' + r.ref + ' approved — ready to pay £' + money_(r.totalAmount),
+  sendMail_(c.emails.accounts, 'Locum claim ' + r.ref + ' approved — ' + (r.accountNumber ? 'ready to pay £' + money_(r.totalAmount) : 'to be settled in cash'),
     'Claim ' + r.ref + ' was approved by ' + r.validatorName + '.\n\n' +
-    'Pay £' + money_(r.totalAmount) + ' to ' + r.bankName + ', sort ' + r.sortCode + ', account ' + r.accountNumber + ', reference ' + r.ref + '.\n' +
+    (r.accountNumber
+      ? 'Pay £' + money_(r.totalAmount) + ' to ' + r.bankName + ', sort ' + r.sortCode + ', account ' + r.accountNumber + ', reference ' + r.ref + '.\n'
+      : 'No bank details on this claim — it is to be settled in cash at the branch (a cash-log entry should cover it; check the flags). Do not pay by bank.\n') +
     (flags.length ? '\nCheck these before paying:\n- ' + flags.join('\n- ') + '\n' : '') +
     '\nMark it paid or send it back:\n' + webUrl_() + '?token=' + atok);
   sendMail_(r.locumEmail, 'Your claim ' + r.ref + ' is approved',
@@ -536,6 +697,8 @@ function settle_(p) {
 
   if (p.action === 'paid') {
     var cash = p.method === 'cash'; // "paid in cash at the branch" — a cash-log entry covered it (spec §6a)
+    if (!cash && !r.accountNumber)
+      return { ok: false, message: 'This claim has no bank details — it can only be settled as paid in cash, or sent back.' };
     var paidByTxt = p.by;
     if (cash) {
       // hard-link the till record: exactly one unlinked locum cash entry for
@@ -603,11 +766,16 @@ function cashCats_(raw) {
 
 function cashMeta_() {
   var c = readConfig_();
+  var vmap = {};
+  c.validators.filter(function (v) { return v.active; }).forEach(function (v) {
+    (vmap[v.pharmacy] = vmap[v.pharmacy] || []).push(v.name); // names only — never emails
+  });
   return {
     ok: true,
     reviewCeiling: c.cash.threshold, ackThreshold: c.cash.threshold, // ackThreshold kept for old cached pages
     pharmacies: c.pharmacies.filter(function (p) { return p.active; }).map(function (p) { return p.name; }),
-    categories: c.cash.categories
+    categories: c.cash.categories,
+    validators: vmap // the on-behalf claim path needs an approver picker
   };
 }
 
@@ -676,8 +844,11 @@ function cashLog_(pl) {
     if (!pl.role) errs.push('Role');
     if (pl.role === 'Pharmacist' && !/^\d{7}$/.test(pl.gphc || '')) errs.push('GPhC number (7 digits)');
     if (!pl.rtw) errs.push('Right-to-work confirmation');
-    if (!pl.claimRef && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pl.locumEmail || ''))
-      errs.push('The locum’s email (needed to match a claim later) — or link their claim reference');
+    // no existing claim = the branch fills the worked days HERE and a claim is
+    // raised on the locum's behalf (spec §6b) — if the locum could have
+    // submitted one, the payment wouldn't be coming through this route
+    if (!pl.claimRef && !parseLocumDays_(pl.locumDays).dayKeys.length)
+      errs.push('The days they worked, with hours — or link their claim reference');
   }
   if (pl.paidFrom === 'pocket' && pl.payerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pl.payerEmail))
     errs.push('A valid email for the person owed (or leave it blank)');
@@ -693,7 +864,7 @@ function cashLog_(pl) {
     if (!req) return { ok: false, errors: ['Approval ' + String(pl.requestRef).trim().toUpperCase() + ' was not found — check the reference.'] };
   }
 
-  var loc = cashLocumChecks_(pl);
+  var loc = pl.claimRef ? cashLocumChecks_(pl) : { errs: [], flags: [], claim: null };
   if (loc.errs.length) return { ok: false, errors: loc.errs };
   var judged = cashJudge_(pl, cat, c, req);
   var flags = judged.flags.concat(loc.flags);
@@ -705,8 +876,21 @@ function cashLog_(pl) {
       flags.push('Looks like a repeat of ' + r.ref + ' (same pharmacy, category, amount and date). Check this is not logged twice.');
   });
 
-  var pending = judged.pending || flags.length > 0;
   var ref = 'CX-' + Utilities.getUuid().replace(/-/g, '').slice(0, 5).toUpperCase();
+
+  // no claim linked → raise one from the branch's own input, before the entry
+  // is written (any claim-side validation error stops the whole log)
+  var raised = null;
+  if (isLocumCat_(pl.category) && !pl.claimRef) {
+    var days = parseLocumDays_(pl.locumDays);
+    var rate = Math.round(pl.amount / days.totalHours * 100) / 100;
+    raised = branchClaimCore_(pl, c, { origin: 'branch-cash', rate: rate, totalAmount: pl.amount, bank: null, cashRef: ref });
+    if (!raised.ok) return { ok: false, errors: raised.errors };
+    flags = flags.concat(raised.flags);
+    flags.push('Claim ' + raised.ref + ' raised from this entry — awaiting approval by ' + raised.validator + '.');
+  }
+
+  var pending = judged.pending || flags.length > 0;
   var receiptUrl = '';
   if (pl.receipt && pl.receipt.indexOf('data:') === 0) {
     try {
@@ -722,7 +906,8 @@ function cashLog_(pl) {
   row.amount = pl.amount; row.date = pl.date; row.reason = pl.reason;
   row.fromTill = pl.paidFrom === 'till'; row.paidFrom = pl.paidFrom;
   row.payerEmail = pl.payerEmail || ''; row.emergency = !!pl.emergency;
-  row.requestRef = req ? req.ref : ''; row.claimRef = loc.claim ? loc.claim.ref : (pl.claimRef ? String(pl.claimRef).trim().toUpperCase() : '');
+  row.requestRef = req ? req.ref : '';
+  row.claimRef = raised ? raised.ref : (loc.claim ? loc.claim.ref : (pl.claimRef ? String(pl.claimRef).trim().toUpperCase() : ''));
   row.locumEmail = (pl.locumEmail || (loc.claim ? loc.claim.locumEmail : '') || '').toLowerCase();
   row.receiptUrl = receiptUrl; row.notes = pl.notes || ''; row.flagsJson = JSON.stringify(flags);
   row.person = pl.person || ''; row.role = pl.role || ''; row.gphc = pl.gphc || ''; row.rtw = !!pl.rtw;
@@ -1190,6 +1375,7 @@ function money_(n) { return Number(n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\
 function webUrl_() { return PROPS.getProperty('PAGE_URL_CLAIM') || 'https://bmoukik.github.io/locum-claim/index.html'; }
 function cashUrl_() { return PROPS.getProperty('PAGE_URL_CASH') || 'https://bmoukik.github.io/locum-claim/cash-log.html'; }
 function sendMail_(to, subject, body) {
+  if (!to) return; // branch-raised claims may have no locum email on file
   var c = readConfig_();
   MailApp.sendEmail({ to: to, subject: subject, body: body + '\n\n— ' + COMPANY + ' apps', replyTo: c.emails.locumHandling, name: COMPANY });
 }

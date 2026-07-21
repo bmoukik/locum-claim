@@ -161,16 +161,27 @@ fullPage). Demo tokens print to the browser console where applicable.
   accounts settles it with the "paid in cash at the branch" tick — which
   **back-fills `claimRef` onto the cash entry** when exactly one matches, so
   the link reads both ways from sheet data alone. Locum entries are always
-  reviewed and require claim ref or locum email. **The worked days/hours live
-  ONLY on the claim** (monthsJson per-month split — the P&L allocation data);
-  the cash form never collects them (two records would drift, and it would
-  bypass the validator). A cash-first entry with no claim is therefore chased
-  by the weekday cron on the locum reminder/escalate cadence (locum nudged →
-  locumHandling escalated, max one each, stops once any live claim from that
-  email exists). **P&L rule:** Claims tab = the locum cost record (month
-  split, `paidMethod` bank/cash); locum-category Cash Log rows are till
-  movements — a future pipeline must never ingest both as locum expense or
-  cash-paid locums double-count.
+  reviewed. **The worked days/hours live ONLY on the claim** (monthsJson
+  per-month split — the P&L allocation data); the cash row never duplicates
+  them. **P&L rule:** Claims tab = the locum cost record (month split,
+  `paidMethod` bank/cash, `cashEntryRef`); locum-category Cash Log rows are
+  till movements — a future pipeline must never ingest both as locum expense
+  or cash-paid locums double-count (full filter rules in spec §6a).
+- **Branch-raised claims (21 Jul 2026, owner steer — spec §6b):** when the
+  locum can't or won't submit ("if they could have, it wouldn't come through
+  this route"), the BRANCH fills the worked days at the counter and a claim
+  is raised on the locum's behalf — no chasing the locum afterwards (the cron
+  chase now covers pre-migration rows only). Two routes from the cash-log
+  locum path: **cash was paid now** (entry + auto-raised claim
+  `origin='branch-cash'`, rate derived amount÷hours; HO ack + validator
+  approval in either order — whichever comes second auto-settles the claim as
+  PAID/cash) and **head office should pay them** (`action:'branchclaim'`,
+  `origin='branch-hopays'`, locum's bank details required, no cash moves;
+  validator approves → accounts pay by bank as normal). Fraud tripwire: the
+  locum is emailed whenever a claim is raised in their name (when an address
+  exists); `submittedBy` recorded; self-approval + duplicate-days checks run
+  (duplicates by email, or by NAME when no email); bankless claims cannot be
+  bank-paid.
 - **Stock transfer:** phone/WhatsApp coordination stays exactly as it is —
   the app only records what moved (~20s form) + one-tap receive. No request/
   broadcast/approval workflow, no WhatsApp bot (official API costs per
