@@ -194,10 +194,24 @@ fullPage). Demo tokens print to the browser console where applicable.
   resurfaces the orphaned entry on any resubmission; tokenless `cashReqStatus_`
   no longer returns decider name or verbatim reason; money stored at 2dp. Tests
   162→178. Known-but-unfixed (deliberate, tracked, revisit before wider
-  rollout): no validator-reassignment path; partial/split payments; single
-  30-day token expiry on APPROVED/PENDING/OWED; public-endpoint email-relay/DoS
-  + 5-char ref guessability (architectural — token-as-credential); plus-alias
-  self-approval tripwire (documented).
+  rollout): partial/split payments; public-endpoint email-relay/DoS + 5-char ref
+  guessability (architectural — token-as-credential); plus-alias self-approval
+  tripwire (documented); cash-side token expiry (PENDING review / OWED pocket
+  links still single-token).
+- **Head-office manage + APPROVED chase (21 Jul 2026 — spec §9/§9a):** closes
+  the two worst stranding gaps. (1) Cron now also chases APPROVED-but-unpaid
+  claims — reminds accounts with a FRESH token at reminderDays, escalates to
+  locumHandling at escalateDays — so an approved claim can never become
+  unpayable via a missed/expired token (`acctRemindedAt`/`acctEscalatedAt`).
+  (2) A **MANAGE token** (view `manage`, emailed to locumHandling on every
+  escalation) gives head office three levers on the public page, no bank shown:
+  **reassign** a stuck claim to another active validator at the same pharmacy
+  (resets the chase — the answer to "only validator is on holiday"), **resend**
+  an approved claim to accounts (fresh token), **withdraw** a claim entirely
+  (`WITHDRAWN`, terminal, behaves like REJECTED — doesn't block resubmission,
+  resurfaces any cash paid against it). New claim status `WITHDRAWN`; new cols
+  `acctRemindedAt`/`acctEscalatedAt` (migrateCash_ appends them). Tests 178→201;
+  a 7-check manage-page Playwright smoke added.
 - **Stock transfer:** phone/WhatsApp coordination stays exactly as it is —
   the app only records what moved (~20s form) + one-tap receive. No request/
   broadcast/approval workflow, no WhatsApp bot (official API costs per

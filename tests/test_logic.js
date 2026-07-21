@@ -55,6 +55,7 @@ function build() {
     Validators: fakeSheet([
       ['Pharmacy', 'Name', 'Email', 'Active'],
       ['High Street', 'Sam Okafor', 'sam@test.co', true],
+      ['High Street', 'Dana Lee', 'dana@test.co', true], // 2nd active approver — reassign target
       ['High Street', 'Inactive Val', 'iv@test.co', false],
       ['Riverside', 'Priya Shah', 'priya@test.co', true],
     ]),
@@ -159,7 +160,7 @@ function ok(cond, name) {
   const { s } = build();
   const pub = s.publicConfig_();
   ok(pub.pharmacies.join(',') === 'High Street,Riverside', 'publicConfig_ active pharmacies only');
-  ok(pub.validators['High Street'].join(',') === 'Sam Okafor', 'publicConfig_ active validator names only');
+  ok(pub.validators['High Street'].join(',') === 'Sam Okafor,Dana Lee', 'publicConfig_ active validator names only');
   const blob = JSON.stringify(pub);
   ok(blob.indexOf('@') === -1, 'publicConfig_ contains no email addresses');
   ok(blob.toLowerCase().indexOf('pin') === -1, 'publicConfig_ contains no pin material');
@@ -781,6 +782,104 @@ function cashToken(env, ref) {
   ok(row.status === 'REJECTED' && row.cap === null, 'status still returned to the branch device');
   ok(!('decideReason' in row) && !('decidedBy' in row), 'verbatim reason + decider identity NOT leaked');
   ok(!JSON.stringify(st).includes('Dave') && !JSON.stringify(st).includes('HO Person'), 'no names or reasons anywhere in the payload');
+}
+
+// --- head-office manage: reassign / resend / withdraw (spec §9a) ------------
+function manageToken(env, ref) {
+  const rows = env.dataSheets().Tokens._rows.slice(1);
+  const m = rows.filter((r) => r[2] === ref && r[3] === 'manage');
+  return m.length ? m[m.length - 1][0] : null;
+}
+{
+  // reassign an absent validator's claim to another approver
+  const env = build(); const { s, sent } = env;
+  const claim = s.submit_(basePl()); // validator Sam Okafor @ High Street
+  const mtok = s.mintToken_('claim', claim.ref, 'manage');
+  ok(s.manageClaim_({ token: mtok, to: 'Priya Shah' }, 'reassign').ok === false, 'reassign needs a typed name');
+  ok(s.manageClaim_({ token: mtok, by: 'HO', to: 'Nobody' }, 'reassign').ok === false, 'reassign to an unknown approver refused');
+  ok(s.manageClaim_({ token: mtok, by: 'HO', to: 'Sam Okafor' }, 'reassign').ok === false, 'reassign to the same approver refused');
+  ok(s.manageClaim_({ token: mtok, by: 'HO', to: 'Priya Shah' }, 'reassign').ok === false, 'reassign to another pharmacy’s approver refused');
+  sent.length = 0;
+  const rr = s.manageClaim_({ token: mtok, by: 'HO Person', to: 'Dana Lee' }, 'reassign');
+  ok(rr.ok && rr.validator === 'Dana Lee', 'reassign lands');
+  const row = s.findByRef_('Claims', s.CLAIM_COLS, claim.ref);
+  ok(row.validatorName === 'Dana Lee' && !row.remindedAt && !row.escalatedAt, 'validator swapped + chase cycle reset');
+  ok(sent.some((m) => m.to === 'dana@test.co' && /reassigned to you/.test(m.subject)), 'new approver emailed a fresh link');
+  // the old validator's outstanding token is now stale (claim points elsewhere)
+  const oldTok = tokenFor(env, claim.ref, 'validator');
+  ok(s.decide_({ token: oldTok, action: 'approve' }).ok === true, 'a validator token still approves the claim (reassign is about who is chased, not locking old links)');
+}
+{
+  // manage view never leaks bank details, lists the pharmacy's approvers
+  const env = build(); const { s } = env;
+  const claim = s.submit_(basePl());
+  const view = s.claimGet_(s.mintToken_('claim', claim.ref, 'manage'));
+  ok(view.ok && view.view === 'manage' && !('bank' in view), 'manage view carries no bank object');
+  ok(view.validators.indexOf('Sam Okafor') >= 0 && view.hasBank === true, 'manage view lists approvers + flags bank presence');
+}
+{
+  // resend re-issues a FRESH accounts token for an approved-but-unpaid claim
+  const env = build(); const { s, sent } = env;
+  const claim = s.submit_(basePl());
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  const mtok = s.mintToken_('claim', claim.ref, 'manage');
+  sent.length = 0;
+  const rs = s.manageClaim_({ token: mtok, by: 'HO Person' }, 'resend');
+  ok(rs.ok && rs.sentTo === 'accounts', 'resend lands for an APPROVED claim');
+  ok(sent.some((m) => m.to === 'accounts@test.co' && /resent/i.test(m.subject)), 'accounts get a fresh payment email');
+  const aTok = tokenFor(env, claim.ref, 'accounts'); // newest accounts token
+  ok(s.settle_({ token: aTok, action: 'paid', by: 'Pat' }).ok === true, 'the fresh accounts token can pay the claim');
+  ok(s.manageClaim_({ token: mtok, by: 'HO' }, 'resend').code === 'processed', 'resend refused once the claim is paid');
+}
+{
+  // withdraw closes a stuck claim; a branch-cash withdrawal warns money is out
+  const env = build(); const { s, sent } = env;
+  const r = s.cashLog_(behalfCash());
+  const clmRef = cashRow(env, r.ref).claimRef;
+  const mtok = s.mintToken_('claim', clmRef, 'manage');
+  ok(s.manageClaim_({ token: mtok, by: 'HO' }, 'withdraw').ok === false, 'withdraw needs a reason');
+  sent.length = 0;
+  const w = s.manageClaim_({ token: mtok, by: 'HO Person', reason: 'duplicate of another claim' }, 'withdraw');
+  ok(w.ok && w.status === 'WITHDRAWN', 'withdraw lands');
+  ok(sent.some((m) => m.to === 'desk@test.co' && /Cash already paid for withdrawn/.test(m.subject)), 'branch-cash withdrawal warns the money is out');
+  // a withdrawn claim no longer blocks a corrected resubmission by duplicate days
+  const fresh = s.submit_(basePl({ email: 'jane@test.co', name: 'Jane Locum', rate: 10,
+    months: [{ label: JSON.parse(s.findByRef_('Claims', s.CLAIM_COLS, clmRef).monthsJson)[0].label, entries: [{ day: JSON.parse(s.findByRef_('Claims', s.CLAIM_COLS, clmRef).monthsJson)[0].days[0], hours: 8 }] }] }));
+  ok(fresh.ok && !(fresh.flags || []).some((f) => new RegExp('claim ' + clmRef).test(f)), 'withdrawn claim does not duplicate-flag a resubmission');
+}
+
+// --- cron: chase APPROVED-but-unpaid claims, re-minting tokens --------------
+{
+  const env = build(); const { s, sent } = env;
+  const RealDate = Date;
+  const WED = new RealDate('2026-07-22T10:00:00Z').getTime();
+  s.Date = class extends RealDate { constructor(...a) { a.length ? super(...a) : super(WED); } static now() { return WED; } };
+  const claim = s.submit_(basePl());
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  // approved last Wednesday → 5 working days by this Wednesday (≥ escalateDays 4)
+  s.writeCell_('Claims', s.findByRef_('Claims', s.CLAIM_COLS, claim.ref)._row, s.CLAIM_COLS, 'approvedAt', '2026-07-15T09:00:00Z');
+  sent.length = 0;
+  s.remindAndEscalate();
+  ok(sent.some((m) => m.to === 'desk@test.co' && /approved claim .* still unpaid/.test(m.subject)), 'stale approved claim escalates to head office');
+  ok(!!s.findByRef_('Claims', s.CLAIM_COLS, claim.ref).acctEscalatedAt, 'acctEscalatedAt stamped');
+  const n = sent.length;
+  s.remindAndEscalate();
+  ok(sent.length === n, 'no repeat escalation on the next run');
+}
+{
+  const env = build(); const { s, sent } = env;
+  const RealDate = Date;
+  const WED = new RealDate('2026-07-22T10:00:00Z').getTime();
+  s.Date = class extends RealDate { constructor(...a) { a.length ? super(...a) : super(WED); } static now() { return WED; } };
+  const claim = s.submit_(basePl());
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  // approved Monday → 2 working days (= reminderDays), reminder not escalation
+  s.writeCell_('Claims', s.findByRef_('Claims', s.CLAIM_COLS, claim.ref)._row, s.CLAIM_COLS, 'approvedAt', '2026-07-20T09:00:00Z');
+  sent.length = 0;
+  s.remindAndEscalate();
+  ok(sent.some((m) => m.to === 'accounts@test.co' && /waiting for payment/.test(m.subject)), 'accounts reminded with a fresh token');
+  const aTok = tokenFor(env, claim.ref, 'accounts');
+  ok(s.settle_({ token: aTok, action: 'paid', by: 'Pat' }).ok === true, 're-minted accounts token pays — an APPROVED claim can never become unpayable');
 }
 
 // --- admin save with the category matrix ------------------------------------

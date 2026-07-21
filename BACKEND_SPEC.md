@@ -565,18 +565,55 @@ A slow validator gets chased, then escalated to a human. That is the whole
 point: money moving requires a positive, logged action by a person.
 
 ```
-for each claim where status in (SUBMITTED, RAISED):
-    d = workingDaysSince(lastActionAt)     # submittedAt, or raise.at
+for each claim where status in (SUBMITTED, RAISED):      # waiting for a validator
+    d = workingDaysSince(lastActionAt)                   # submittedAt, or raise.at
     if d >= locum.escalateDays and not escalatedAt:
-        email email.locumHandling  -> "CLM-X has sat N working days with <validator>"
+        email email.locumHandling (MANAGE token link) -> "reassign / withdraw"
         set escalatedAt = now
     else if d >= locum.reminderDays and not remindedAt:
         email validator (fresh token link) -> "CLM-X is waiting for you"
         set remindedAt = now
+
+for each claim where status == APPROVED:                 # waiting for accounts to pay
+    d = workingDaysSince(approvedAt)
+    if d >= locum.escalateDays and not acctEscalatedAt:
+        email email.locumHandling (MANAGE token link) -> "resend to accounts / withdraw"
+        set acctEscalatedAt = now
+    else if d >= locum.reminderDays and not acctRemindedAt and not acctEscalatedAt:
+        email email.accounts (FRESH accounts token) -> "approved, still unpaid"
+        set acctRemindedAt = now
 ```
+
+The APPROVED chase is what stops an approved claim from silently dying: without
+it, accounts missing the one approval email — or its 30-day token expiring —
+would leave the claim permanently unpayable. Each reminder mints a **fresh**
+accounts token, so a working payment link always exists.
 
 Defaults: remind at **2** working days, escalate at **4**. Both live in config,
 both editable in admin. Confirmed 17 Jul 2026.
+
+### 9a. Head-office manage (the recovery lever)
+
+The escalation emails carry a **MANAGE token** (`view:'manage'`, emailed only
+to `email.locumHandling`). `GET ?action=claim&token=<manage>` returns the claim
+in any state (no bank details, plus the pharmacy's active validator names).
+Three POST actions, each requiring a typed `by`:
+
+- `reassign {token, to, by}` — move a stuck SUBMITTED/RAISED claim to another
+  active validator at the same pharmacy (not the current one, not the locum,
+  not the raiser). Mints a fresh validator token, emails the new approver, and
+  **resets `remindedAt`/`escalatedAt`** so the chase starts clean. This is the
+  answer to "the only validator is on holiday."
+- `resend {token, by}` — re-issue a fresh accounts token for an APPROVED claim
+  (manual twin of the APPROVED chase, for when someone notices before the
+  cron).
+- `withdraw {token, by, reason}` — kill a claim that should not proceed
+  (`status=WITHDRAWN`, terminal; locum emailed). A WITHDRAWN claim behaves like
+  REJECTED everywhere: it never blocks a resubmission's duplicate-day check,
+  and any cash already paid against it resurfaces as a live flag + pings
+  `locumHandling`.
+
+`WITHDRAWN` is a new terminal claim status alongside REJECTED/PAID.
 
 `workingDaysSince`: Mon–Fri only.
 **Ceiling:** it does not know England/Wales bank holidays, so over a bank
@@ -610,10 +647,12 @@ linkedCashRef`
 
 Claims — appended at the end: `paidMethod` (`bank` | `cash`), `cashEntryRef`
 (the CX ref that settled it, when known), `submittedBy` (who raised it, for
-branch-raised claims), `origin` (`locum` | `branch-cash` | `branch-hopays`).
+branch-raised claims), `origin` (`locum` | `branch-cash` | `branch-hopays`),
+`acctRemindedAt`, `acctEscalatedAt` (the APPROVED-claim chase, §9).
 
 Status values — Claims: `SUBMITTED → APPROVED → PAID`, plus `REJECTED` (by
-validator) and `RAISED` (by accounts, returns to `SUBMITTED`-like handling).
+validator), `RAISED` (by accounts, returns to `SUBMITTED`-like handling) and
+`WITHDRAWN` (by head office via manage, terminal — treated like REJECTED).
 Cash Log: `RECORDED | PENDING → ACKNOWLEDGED | QUERIED` (+ `repaidAt` set once
 a pocket entry is repaid). Cash Requests: `REQUESTED → APPROVED | REJECTED |
 LAPSED`.

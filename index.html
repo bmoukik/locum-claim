@@ -348,8 +348,83 @@ function claimPage(token){
       if(c.code==='expired') return h('<div class="card"><div class="banner bad">This link has expired.</div><p class="hint">Ask the locum to resubmit, or contact head office.</p></div>');
       return h('<div class="card"><div class="banner bad">This link is not valid.</div><p class="hint">The claim may have been removed. Contact head office if unexpected.</p></div>');
     }
-    if(c.view==='accounts') renderAccounts(token,c); else renderReview(token,c);
+    if(c.view==='manage') renderManage(token,c);
+    else if(c.view==='accounts') renderAccounts(token,c);
+    else renderReview(token,c);
   }).catch(function(){ fatal('No connection — check your signal and try again.'); });
+}
+
+// ===========================================================================
+// HEAD-OFFICE MANAGE — reassign a stuck claim, resend an approved one to
+// accounts, or withdraw it. Reached by a token link in an escalation email.
+// ===========================================================================
+function renderManage(token,c,errMsg){
+  var canReassign=(c.status==='SUBMITTED'||c.status==='RAISED');
+  var canResend=(c.status==='APPROVED');
+  var vopts=(c.validators||[]).filter(function(n){return n!==c.validatorName;})
+    .map(function(n){return '<option>'+esc(n)+'</option>';}).join('');
+  h('<div class="card">'+
+    (errMsg?'<div class="banner bad">'+esc(errMsg)+'</div>':'')+
+    '<h2>Claim '+esc(c.ref)+'</h2>'+
+    '<p class="sub">Head office. This claim is <b>'+esc(c.status)+'</b>'+
+      (c.validatorName?', with approver <b>'+esc(c.validatorName)+'</b>':'')+
+      (c.submittedBy?'.<br>Raised by '+esc(c.submittedBy):'')+'.</p>'+
+    claimSummary(c)+
+    (canReassign
+      ? '<h3>Reassign to another approver</h3>'+
+        (vopts
+          ? '<label>New approver (for '+esc(c.pharmacy)+')</label><select id="m_to"><option value="">— select —</option>'+vopts+'</select>'+
+            '<label>Your name</label><input type="text" id="m_by" autocomplete="name">'+
+            '<button class="btn green" id="reassignbtn">Reassign — send to them</button>'
+          : '<div class="banner info">No other active approver is set up for '+esc(c.pharmacy)+'. Add one in the admin console first.</div>')
+      : '')+
+    (canResend
+      ? '<h3>Resend to accounts</h3>'+
+        '<p class="hint">Issues a fresh payment link to accounts — use if the last one was missed or expired.</p>'+
+        '<label>Your name</label><input type="text" id="m_rby" autocomplete="name">'+
+        '<button class="btn green" id="resendbtn">Resend for payment</button>'
+      : '')+
+    ((canReassign||canResend)
+      ? '<details><summary>Withdraw this claim…</summary>'+
+        '<label>Your name</label><input type="text" id="m_wby" autocomplete="name">'+
+        '<label>Reason (the locum sees this)</label><textarea id="m_wreason" rows="3"></textarea>'+
+        '<button class="btn red" id="withdrawbtn">Withdraw</button></details>'
+      : '<div class="banner info">This claim is '+esc(c.status)+' — nothing to do here.</div>')+
+    '</div>');
+  var byId=function(i){return document.getElementById(i);};
+  if(byId('reassignbtn')) byId('reassignbtn').onclick=function(){
+    var to=byId('m_to').value, by=byId('m_by').value.trim();
+    if(!to) return renderManage(token,c,'Pick who should approve it.');
+    if(!by) return renderManage(token,c,'Put your name in first.');
+    manageAct(token,c,{action:'reassign',token:token,to:to,by:by});
+  };
+  if(byId('resendbtn')) byId('resendbtn').onclick=function(){
+    var by=byId('m_rby').value.trim();
+    if(!by) return renderManage(token,c,'Put your name in first.');
+    manageAct(token,c,{action:'resend',token:token,by:by});
+  };
+  if(byId('withdrawbtn')) byId('withdrawbtn').onclick=function(){
+    var by=byId('m_wby').value.trim(), reason=byId('m_wreason').value.trim();
+    if(!by) return renderManage(token,c,'Put your name in first.');
+    if(!reason) return renderManage(token,c,'A reason is required to withdraw a claim.');
+    manageAct(token,c,{action:'withdraw',token:token,by:by,reason:reason});
+  };
+}
+function manageAct(token,c,body){
+  h('<div class="card center"><p><span class="spin"></span></p><p class="hint">Working…</p></div>');
+  apiPost(body).then(function(res){
+    if(!res.ok){
+      if(res.code==='processed') return h('<div class="card"><div class="banner info">Claim <b>'+esc(res.ref)+'</b> is already <b>'+esc(res.status)+'</b>.</div></div>');
+      return renderManage(token,c,res.message||'Something went wrong — try again.');
+    }
+    if(body.action==='reassign')
+      h('<div class="card center"><h2>Reassigned</h2><div class="banner good"><b>'+esc(res.ref)+'</b> sent to <b>'+esc(res.validator)+'</b> for approval.</div><p class="hint">You can close this page.</p></div>');
+    else if(body.action==='resend')
+      h('<div class="card center"><h2>Resent</h2><div class="banner good"><b>'+esc(res.ref)+'</b> sent to accounts with a fresh payment link.</div><p class="hint">You can close this page.</p></div>');
+    else
+      h('<div class="card center"><h2>Withdrawn</h2><div class="banner info"><b>'+esc(res.ref)+'</b> withdrawn. The locum has been told.</div><p class="hint">You can close this page.</p></div>');
+    window.scrollTo(0,0);
+  }).catch(function(){ renderManage(token,c,'No connection — nothing was changed. Try again.'); });
 }
 
 // shared between the validator view and the accounts view
@@ -541,6 +616,7 @@ var DEMO_CONFIG_FALLBACK = {
   ],
   validators:[
     {pharmacy:'Crest — High Street', name:'Sam Okafor', email:'moukik.cyber+val.sam@gmail.com', active:true},
+    {pharmacy:'Crest — High Street', name:'Dana Lee', email:'moukik.cyber+val.dana@gmail.com', active:true},
     {pharmacy:'Crest — Riverside', name:'Priya Shah', email:'moukik.cyber+val.priya@gmail.com', active:true},
     {pharmacy:'Crest — Market Square', name:'Tom Ellis', email:'moukik.cyber+val.tom@gmail.com', active:true},
     {pharmacy:'Crest — Station Road', name:'Aisha Khan', email:'moukik.cyber+val.aisha@gmail.com', active:true}
@@ -636,8 +712,14 @@ function demoHandle(method,p){
     lsSet('lc_history', hist);
     console.log('%c[DEMO] Validator link ('+pl.validatorName+'):', 'color:#0D47A1;font-weight:bold',
       location.pathname+'?token='+token);
+    var mtok0=demoTok(); lsSet('lc_tok_'+mtok0, {ref:ref, view:'manage'});
+    console.log('%c[DEMO] Head-office manage link:', 'color:#082E68;font-weight:bold',
+      location.pathname+'?token='+mtok0);
     if(flags.length) console.log('%c[DEMO] flags raised:', 'color:#B45309;font-weight:bold', flags);
     return {ok:true, ref:ref, total:money(totalAmount), hours:totalHours, validator:pl.validatorName};
+  }
+  function demoValidatorsFor(ph){
+    return (cfg.validators||[]).filter(function(v){return v.active&&v.pharmacy===ph;}).map(function(v){return v.name;});
   }
 
   var t = p.token ? lsGet('lc_tok_'+p.token) : null;
@@ -651,8 +733,34 @@ function demoHandle(method,p){
       return {ok:false, code:'processed', ref:c.ref, status:c.status, decidedAt:c.decidedAt};
     var out={}; for(var k in c) out[k]=c[k];
     out.ok=true; out.view=t.view;
-    if(t.view!=='accounts') delete out.bank;  // validator never sees bank details
+    if(t.view!=='accounts') delete out.bank;  // validator + head office never see bank details
+    if(t.view==='manage'){ out.validators=demoValidatorsFor(c.pharmacy); out.hasBank=!!(c.bank&&c.bank.acct); }
     return out;
+  }
+
+  if(method==='POST' && (p.action==='reassign'||p.action==='resend'||p.action==='withdraw')){
+    if(!c||t.view!=='manage') return {ok:false, code:'invalid'};
+    if(!p.by) return {ok:false, message:'Your name is required.'};
+    if(p.action==='reassign'){
+      if(c.status!=='SUBMITTED'&&c.status!=='RAISED') return {ok:false, code:'processed', ref:c.ref, status:c.status};
+      if(!p.to) return {ok:false, message:'Pick an approver.'};
+      c.validatorName=p.to; c.validatorEmail='demo+'+p.to.replace(/\s/g,'').toLowerCase()+'@example.co';
+      lsSet('lc_claim_'+c.ref, c);
+      var vtok2=demoTok(); lsSet('lc_tok_'+vtok2, {ref:c.ref, view:'validator'});
+      console.log('%c[DEMO] Reassigned — new validator link ('+p.to+'):', 'color:#0D47A1;font-weight:bold', location.pathname+'?token='+vtok2);
+      return {ok:true, ref:c.ref, status:c.status, validator:p.to};
+    }
+    if(p.action==='resend'){
+      if(c.status!=='APPROVED') return {ok:false, code:'processed', ref:c.ref, status:c.status};
+      var atok2=demoTok(); lsSet('lc_tok_'+atok2, {ref:c.ref, view:'accounts'});
+      console.log('%c[DEMO] Resent — fresh accounts link:', 'color:#1E9E5A;font-weight:bold', location.pathname+'?token='+atok2);
+      return {ok:true, ref:c.ref, status:c.status, sentTo:'accounts'};
+    }
+    if(c.status==='PAID'||c.status==='WITHDRAWN'||c.status==='REJECTED') return {ok:false, code:'processed', ref:c.ref, status:c.status};
+    if(!p.reason) return {ok:false, message:'A reason is required.'};
+    c.status='WITHDRAWN'; c.rejectReason='Withdrawn by '+p.by+': '+p.reason;
+    lsSet('lc_claim_'+c.ref, c); demoHistStatus(c.ref,'WITHDRAWN');
+    return {ok:true, ref:c.ref, status:'WITHDRAWN'};
   }
 
   if(method==='POST' && (p.action==='approve'||p.action==='reject')){

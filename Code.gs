@@ -113,7 +113,10 @@ var CLAIM_COLS = ['ref', 'submittedAt', 'status', 'locumName', 'locumEmail', 'lo
   // deployed sheets are migrated by appending (migrateCash_)
   'paidMethod', 'cashEntryRef',
   // who raised it: locum themselves, or the branch on their behalf (spec §6b)
-  'submittedBy', 'origin'];
+  'submittedBy', 'origin',
+  // head-office chase of APPROVED-but-unpaid claims (spec §9); tokens are
+  // re-minted on each reminder so an APPROVED claim can never become unpayable
+  'acctRemindedAt', 'acctEscalatedAt'];
 var MONTHS_ = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
   'August', 'September', 'October', 'November', 'December'];
 var CASH_COLS = ['ref', 'at', 'status', 'pharmacy', 'manager', 'category', 'amount', 'date', 'reason', 'fromTill',
@@ -232,6 +235,7 @@ function doPost(e) {
     if (a === 'submit') return out_(submit_(p.payload));
     if (a === 'approve' || a === 'reject') return out_(decide_(p));
     if (a === 'paid' || a === 'raise') return out_(settle_(p));
+    if (a === 'reassign' || a === 'resend' || a === 'withdraw') return out_(manageClaim_(p, a));
     if (a === 'cashlog') return out_(cashLog_(p.payload));
     if (a === 'branchclaim') return out_(branchClaim_(p.payload));
     if (a === 'ack' || a === 'query') return out_(cashDecide_(p));
@@ -393,7 +397,7 @@ function submit_(pl) {
   // flags (mirrored in index.html): duplicate days + bank-details-changed
   var flags = [];
   var mine = rows_('Claims', CLAIM_COLS).filter(function (r) {
-    return String(r.locumEmail).toLowerCase() === pl.email.toLowerCase() && r.status !== 'REJECTED';
+    return String(r.locumEmail).toLowerCase() === pl.email.toLowerCase() && r.status !== 'REJECTED' && r.status !== 'WITHDRAWN';
   });
   var dup = {};
   mine.forEach(function (r) {
@@ -520,7 +524,7 @@ function branchClaimCore_(pl, c, opts) {
   var flags = [];
   var email = String(pl.locumEmail || '').toLowerCase();
   var mine = rows_('Claims', CLAIM_COLS).filter(function (r) {
-    if (r.status === 'REJECTED') return false;
+    if (r.status === 'REJECTED' || r.status === 'WITHDRAWN') return false;
     if (email) return String(r.locumEmail).toLowerCase() === email;
     return String(r.locumName).toLowerCase().trim() === String(pl.person).toLowerCase().trim();
   });
@@ -611,7 +615,7 @@ function cashFlagsForClaim_(r) {
       // that other claim was REJECTED the cash is unbacked again, so let it
       // resurface here so a corrected resubmission still sees it
       var other = findByRef_('Claims', CLAIM_COLS, x.claimRef);
-      if (other && other.status !== 'REJECTED') return;
+      if (other && other.status !== 'REJECTED' && other.status !== 'WITHDRAWN') return;
     }
     var linked = String(x.claimRef || '').toUpperCase() === String(r.ref).toUpperCase();
     var sameLocum = x.locumEmail && String(x.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase();
@@ -640,6 +644,13 @@ function claimView_(r, view) {
   };
   if (r.approvedBy) o.approval = { by: r.approvedBy, at: r.approvedAt };
   if (view === 'accounts') o.bank = { name: r.bankName, sort: String(r.sortCode), acct: String(r.accountNumber) }; // validator NEVER gets bank
+  if (view === 'manage') {
+    // head office picks a replacement approver — active validators for this
+    // pharmacy, names only (never emails, never bank)
+    var cfgM = readConfig_();
+    o.hasBank = !!r.accountNumber;
+    o.validators = cfgM.validators.filter(function (v) { return v.pharmacy === r.pharmacy && v.active; }).map(function (v) { return v.name; });
+  }
   return o;
 }
 
@@ -653,6 +664,8 @@ function claimGet_(tok) {
     return { ok: false, code: 'processed', ref: r.ref, status: r.status, decidedAt: r.approvedAt || r.paidAt };
   if (t.view === 'accounts' && r.status !== 'APPROVED')
     return { ok: false, code: 'processed', ref: r.ref, status: r.status, decidedAt: r.paidAt || r.raisedAt };
+  // the manage view (head office) shows the claim in any state — it decides
+  // for itself what actions are still possible
   return claimView_(r, t.view);
 }
 
@@ -795,6 +808,68 @@ function settle_(p) {
       'Accounts could not pay claim ' + r.ref + ' yet:\n\n' + p.reason + '\n\nFix it and submit a fresh claim.');
   }
   return { ok: true, ref: r.ref, status: 'RAISED', locum: r.locumName };
+}
+
+// ---------------------------------------------------------------------------
+// HEAD-OFFICE MANAGE (spec §9a) — the recovery lever for stuck claims.
+// A 'manage' token is emailed to email.locumHandling on escalation. It lets
+// head office reassign a claim to another validator (absent approver),
+// re-send an approved-but-unpaid claim to accounts (dead token), or withdraw
+// a claim that should not proceed. Bank details are never exposed here.
+// ---------------------------------------------------------------------------
+function manageClaim_(p, action) {
+  var t = lookupToken_(p.token);
+  if (!t || t.expired || t.view !== 'manage') return { ok: false, code: 'invalid' };
+  var r = findByRef_('Claims', CLAIM_COLS, t.ref);
+  if (!r) return { ok: false, code: 'invalid' };
+  if (!p.by) return { ok: false, message: 'Your name is required.' };
+  var c = readConfig_();
+  var now = new Date().toISOString();
+
+  if (action === 'reassign') {
+    if (r.status !== 'SUBMITTED' && r.status !== 'RAISED') return { ok: false, code: 'processed', ref: r.ref, status: r.status };
+    if (!p.to) return { ok: false, message: 'Pick an approver.' };
+    var v = c.validators.filter(function (x) { return x.pharmacy === r.pharmacy && x.name === p.to && x.active; })[0];
+    if (!v) return { ok: false, message: 'That approver is not available for ' + r.pharmacy + '.' };
+    if (String(v.name).toLowerCase().trim() === String(r.validatorName).toLowerCase().trim()) return { ok: false, message: 'That is already the approver.' };
+    if (r.locumEmail && String(v.email).toLowerCase().trim() === String(r.locumEmail).toLowerCase().trim()) return { ok: false, message: 'That approver is the locum — pick someone else.' };
+    if (String(v.name).toLowerCase().trim() === String(r.submittedBy || '').toLowerCase().trim().split(' (')[0]) return { ok: false, message: 'That is the person who raised the claim — pick someone else.' };
+    writeCell_('Claims', r._row, CLAIM_COLS, 'validatorName', v.name);
+    writeCell_('Claims', r._row, CLAIM_COLS, 'validatorEmail', v.email);
+    writeCell_('Claims', r._row, CLAIM_COLS, 'remindedAt', '');  // fresh chase cycle for the new approver
+    writeCell_('Claims', r._row, CLAIM_COLS, 'escalatedAt', '');
+    var vtok = mintToken_('claim', r.ref, 'validator');
+    sendMail_(v.email, 'Locum claim ' + r.ref + ' — reassigned to you for approval',
+      'Head office (' + p.by + ') asked you to approve claim ' + r.ref + ' (' + r.locumName + ', £' + money_(r.totalAmount) + ', ' + r.pharmacy + ').\n' +
+      'Approve or reject it:\n' + webUrl_() + '?token=' + vtok);
+    return { ok: true, ref: r.ref, status: r.status, validator: v.name };
+  }
+
+  if (action === 'resend') {
+    if (r.status !== 'APPROVED') return { ok: false, code: 'processed', ref: r.ref, status: r.status };
+    var atok = mintToken_('claim', r.ref, 'accounts');
+    writeCell_('Claims', r._row, CLAIM_COLS, 'acctRemindedAt', now);
+    sendMail_(c.emails.accounts, 'Claim ' + r.ref + ' resent — approved and waiting for payment',
+      p.by + ' asked accounts to settle claim ' + r.ref + ' (' + r.locumName + ', £' + money_(r.totalAmount) + '), approved by ' + r.validatorName + '.\n' +
+      (r.accountNumber
+        ? 'Pay ' + r.bankName + ', sort ' + r.sortCode + ', account ' + r.accountNumber + ', reference ' + r.ref + '.\n'
+        : 'No bank details — settle in cash at the branch. Do not pay by bank.\n') +
+      'Mark it paid or send it back:\n' + webUrl_() + '?token=' + atok);
+    return { ok: true, ref: r.ref, status: r.status, sentTo: 'accounts' };
+  }
+
+  // withdraw — a claim that should not proceed at all
+  if (r.status === 'PAID' || r.status === 'WITHDRAWN' || r.status === 'REJECTED') return { ok: false, code: 'processed', ref: r.ref, status: r.status };
+  if (!p.reason) return { ok: false, message: 'A reason is required.' };
+  writeCell_('Claims', r._row, CLAIM_COLS, 'status', 'WITHDRAWN');
+  writeCell_('Claims', r._row, CLAIM_COLS, 'rejectReason', 'Withdrawn by ' + p.by + ': ' + p.reason);
+  sendMail_(r.locumEmail, 'Your claim ' + r.ref + ' was withdrawn',
+    'Head office withdrew claim ' + r.ref + ':\n\n' + p.reason + '\n\nContact head office if you have any questions.');
+  // if cash was already paid against it, the money is now unbacked — say so
+  var paid = r.cashEntryRef ? findByRef_('Cash Log', CASH_COLS, r.cashEntryRef) : null;
+  if (paid) sendMail_(c.emails.locumHandling, 'Cash already paid for withdrawn claim ' + r.ref,
+    '£' + money_(paid.amount) + ' cash was paid at ' + paid.pharmacy + ' (entry ' + paid.ref + ') for claim ' + r.ref + ', now withdrawn. Recover it if appropriate.');
+  return { ok: true, ref: r.ref, status: 'WITHDRAWN' };
 }
 
 // ---------------------------------------------------------------------------
@@ -1388,9 +1463,11 @@ function remindAndEscalate() {
     var lastAction = r.raisedAt || r.submittedAt;
     var d = workingDaysSince_(new Date(lastAction));
     if (d >= c.locum.escalateDays && !r.escalatedAt) {
+      var mtok = mintToken_('claim', r.ref, 'manage');
       sendMail_(c.emails.locumHandling, 'Escalation: claim ' + r.ref + ' waiting ' + d + ' working days',
         'Claim ' + r.ref + ' (' + r.locumName + ', £' + money_(r.totalAmount) + ', ' + r.pharmacy + ') has sat ' + d +
-        ' working days with ' + r.validatorName + '.\nA reminder was already sent; this is the escalation. Please chase or reassign.');
+        ' working days with ' + r.validatorName + '.\nA reminder was already sent; this is the escalation.\n' +
+        'Chase them, or reassign / withdraw the claim here:\n' + webUrl_() + '?token=' + mtok);
       writeCell_('Claims', r._row, CLAIM_COLS, 'escalatedAt', new Date().toISOString());
     } else if (d >= c.locum.reminderDays && !r.remindedAt) {
       var tok = mintToken_('claim', r.ref, 'validator');
@@ -1398,6 +1475,28 @@ function remindAndEscalate() {
         'Claim ' + r.ref + ' (' + r.locumName + ', £' + money_(r.totalAmount) + ') has been waiting ' + d + ' working days.\n' +
         'Approve or reject it:\n' + webUrl_() + '?token=' + tok);
       writeCell_('Claims', r._row, CLAIM_COLS, 'remindedAt', new Date().toISOString());
+    }
+  });
+
+  // APPROVED but never paid: accounts missed the email, or its 30-day token
+  // expired. Chase accounts with a FRESH token (so the claim can never become
+  // unpayable), then escalate to head office with a manage link.
+  rows_('Claims', CLAIM_COLS).forEach(function (r) {
+    if (r.status !== 'APPROVED') return;
+    var d = workingDaysSince_(new Date(r.approvedAt || r.submittedAt));
+    if (d >= c.locum.escalateDays && !r.acctEscalatedAt) {
+      var mtok = mintToken_('claim', r.ref, 'manage');
+      sendMail_(c.emails.locumHandling, 'Escalation: approved claim ' + r.ref + ' still unpaid after ' + d + ' working days',
+        'Claim ' + r.ref + ' (' + r.locumName + ', £' + money_(r.totalAmount) + ') was approved but has not been paid in ' + d + ' working days.\n' +
+        'Re-send it to accounts, or withdraw it, here:\n' + webUrl_() + '?token=' + mtok);
+      writeCell_('Claims', r._row, CLAIM_COLS, 'acctEscalatedAt', new Date().toISOString());
+    } else if (d >= c.locum.reminderDays && !r.acctRemindedAt && !r.acctEscalatedAt) {
+      var atok2 = mintToken_('claim', r.ref, 'accounts');
+      sendMail_(c.emails.accounts, 'Reminder: claim ' + r.ref + ' approved and waiting for payment',
+        'Claim ' + r.ref + ' (' + r.locumName + ', £' + money_(r.totalAmount) + ') has been approved for ' + d + ' working days and is not paid yet.\n' +
+        (r.accountNumber ? 'Pay ' + r.bankName + ', sort ' + r.sortCode + ', account ' + r.accountNumber + ', reference ' + r.ref + '.\n' : 'Settle in cash — no bank details on this claim.\n') +
+        'Mark it paid or send it back:\n' + webUrl_() + '?token=' + atok2);
+      writeCell_('Claims', r._row, CLAIM_COLS, 'acctRemindedAt', new Date().toISOString());
     }
   });
 
@@ -1410,7 +1509,7 @@ function remindAndEscalate() {
     // if any live claim from this locum exists, the link lands at settle time —
     // the normal claim chasing covers the rest, don't nag the locum again
     var submitted = allClaims.some(function (cl) {
-      return String(cl.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase() && cl.status !== 'REJECTED';
+      return String(cl.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase() && cl.status !== 'REJECTED' && cl.status !== 'WITHDRAWN';
     });
     if (submitted) return;
     var d = workingDaysSince_(new Date(r.at));
