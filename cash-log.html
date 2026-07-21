@@ -191,7 +191,7 @@ function catFor(name){
   var m=null; META.categories.forEach(function(c){ if(c.name===name) m=c; }); return m;
 }
 function approvedUnspent(){
-  return MYREQS.filter(function(r){ return r.status==='APPROVED' && !r.linkedCashRef; });
+  return MYREQS.filter(function(r){ return r.status==='APPROVED' && !r.spent; });
 }
 
 function renderBranch(mode){
@@ -215,9 +215,9 @@ function renderMyRequests(){
       if(r.status==='REQUESTED'){ b='<span class="badge pend">Waiting for head office</span>'; }
       else if(r.status==='APPROVED'){
         b='<span class="badge log">Approved'+(r.cap!=null?' up to £'+money(r.cap):'')+'</span>';
-        note=r.linkedCashRef?('Spent — logged as '+esc(r.linkedCashRef)):'Log the payment when you spend it and link this reference. Lapses 30 days after approval.';
+        note=r.spent?'Spent — already logged.':'Log the payment when you spend it and link this reference. Lapses 30 days after approval.';
       }
-      else if(r.status==='REJECTED'){ b='<span class="badge bad">Not approved</span>'; note=esc(r.decideReason||''); }
+      else if(r.status==='REJECTED'){ b='<span class="badge bad">Not approved</span>'; note='Head office will have emailed the reason — or ask them.'; }
       else if(r.status==='LAPSED'){ b='<span class="badge bad">Lapsed — ask again if still needed</span>'; }
       return '<div class="reqrow"><div class="r1"><span class="ref">'+esc(r.ref)+'</span>'+b+'</div>'+
         '<div class="why">'+esc(r.category)+(r.estAmount?' · £'+money(r.estAmount):'')+(note?'<br>'+note:'')+'</div></div>';
@@ -401,9 +401,15 @@ function renderRecordForm(){
 
 var RECEIPT=null;
 // locum on-behalf helpers — used by the form wiring AND submitRecord
+function dayBounds(){
+  var max=new Date(Date.now()+2*864e5), min=new Date(Date.now()-185*864e5);
+  var iso=function(d){ return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); };
+  return {min:iso(min), max:iso(max)};
+}
 function addDayRow(){
+  var b=dayBounds();
   var row=document.createElement('div'); row.className='dayrow';
-  row.innerHTML='<input type="date" class="d_date"><input type="number" class="d_hours" step="0.25" min="0.25" max="24" placeholder="hours"><button type="button" class="rm">×</button>';
+  row.innerHTML='<input type="date" class="d_date" min="'+b.min+'" max="'+b.max+'"><input type="number" class="d_hours" step="0.25" min="0.25" max="24" placeholder="hours"><button type="button" class="rm">×</button>';
   row.querySelector('.rm').onclick=function(){ row.remove(); updateHoTotal(); };
   row.querySelector('.d_hours').oninput=updateHoTotal;
   $id('dayrows').appendChild(row);
@@ -415,6 +421,13 @@ function readDays(){
     if(d&&hh>0) out.push({date:d, hours:hh});
   });
   return out;
+}
+// same-day-twice check, mirrored from the server so the preview total never
+// disagrees with what gets paid
+function duplicateDay(days){
+  var seen={};
+  for(var i=0;i<days.length;i++){ if(seen[days[i].date]) return days[i].date; seen[days[i].date]=1; }
+  return null;
 }
 function totalDayHours(){ return readDays().reduce(function(a,d){return a+d.hours;},0); }
 function updateHoTotal(){
@@ -488,7 +501,10 @@ function submitRecord(){
     if(!$id('f_rtw').checked)e.push('Right-to-work confirmation');
     if(link&&!$id('f_claimref').value.trim())e.push('Their claim reference');
     if(!link){
-      if(!readDays().length)e.push('The days they worked, with hours');
+      var days=readDays();
+      if(!days.length)e.push('The days they worked, with hours');
+      var dup=duplicateDay(days);
+      if(dup)e.push(dup+' is entered more than once — put each day on a single row');
       if(!$id('f_locval').value)e.push('Who should approve this');
       if($id('f_locemail').value.trim()&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($id('f_locemail').value.trim()))
         e.push('A valid email for the locum (or leave it blank)');
@@ -911,7 +927,9 @@ function demoHandle(method,p){
   }
   if(method==='GET' && p.action==='cashreqstatus'){
     var out=[]; String(p.refs||'').split(',').forEach(function(ref){
-      var q=demoByRef(ref.trim()); if(q&&q._kind==='req') out.push(q);
+      var q=demoByRef(ref.trim());
+      if(q&&q._kind==='req') out.push({ref:q.ref, status:q.status, category:q.category,
+        estAmount:q.estAmount, cap:q.cap, spent:q.linkedCashRef?true:false}); // safe fields only, mirrors server
     });
     return {ok:true, requests:out};
   }

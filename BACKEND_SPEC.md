@@ -357,10 +357,13 @@ Otherwise it is `RECORDED` (self-acknowledged, final, still in the ledger).
   (status `LAPSED`, judged lazily on read). A stale permission must not be
   reusable months later.
 - `GET ?action=cashreqstatus&refs=CR-A,CR-B` → `{ok, requests:[{ref, status,
-  cap, decidedBy, decidedAt, decideReason}]}` — **safe fields only**. The
+  category, estAmount, cap, spent}]}` — **safe fields only, no token**. The
   branch page polls this for the refs the device remembers (localStorage), so
-  branch staff find outcomes on the page they already use — no link-based flow
-  for branch staff (copy rule).
+  branch staff find outcomes on the page they already use (copy rule). Because
+  it is tokenless and refs are short/enumerable, it must NOT return the
+  decider's name or the verbatim rejection reason (those reach the requester
+  by email); returning them would let anyone harvest every branch's spend
+  requests. `spent` = whether an entry has been logged against it.
 
 ### Records
 
@@ -406,9 +409,13 @@ protection are bypassed at the till.
 
 - **Claim first (the intended path):** locum submits a claim as normal,
   validator approves as normal. The branch pays cash and logs a locum-category
-  entry with `claimRef`. Server checks the claim is APPROVED (flags anything
-  else). When head office **acknowledges** the cash entry (typed name), the
-  claim is marked `PAID` with `paidMethod='cash'`,
+  entry with `claimRef`. A claim ref is only honoured on a **locum-category**
+  entry (stripped from any other category, so a "sundries" row can't settle a
+  claim through the back door), and settlement requires the entry and claim to
+  be at the **same pharmacy** and the **same amount** — otherwise one branch
+  could tick another branch's approved claim as paid-in-cash and suppress its
+  real bank payment. When head office **acknowledges** the cash entry (typed
+  name), the claim is marked `PAID` with `paidMethod='cash'`,
   `cashEntryRef` = the CX ref (structured, machine-readable), `paidBy` =
   "<HO name> — cash at <pharmacy> (entry CX-X)", and the locum gets the paid
   email (cash wording). Accounts gets an FYI so they never double-pay by
@@ -459,14 +466,32 @@ approves; nothing is duplicated onto the cash row.
   claim (`origin='branch-hopays'`), validator approves, accounts pay by bank
   exactly like a self-submitted claim.
 - **Fraud tripwire:** whenever a claim is raised in someone's name, the locum
-  is emailed about it (when an address is on file). No email → a stored flag
-  warns receipts can't reach them; blank addresses are never sent to.
+  is emailed about it (when an address is on file) AND head office
+  (`email.locumHandling`) is always pinged independently — so the tripwire
+  does not depend on the locum having/reading an email (the case an insider
+  would exploit). Blank addresses are never sent to.
+- **Submitter ≠ approver:** the manager raising an on-behalf claim cannot also
+  be its approver (typed-name match, `branchClaimCore_`), the same separation
+  the self-submit path gets for free.
+- **Worked-day validation (`parseLocumDays_`):** each day must be a real
+  calendar date within a sensible window (not in the future, not older than
+  ~6 months) — typo years/impossible days are rejected, never written into
+  `monthsJson`. A day entered twice is a hard error, not a silent
+  keep-the-first (which would make the page's total disagree with what is
+  paid). The page mirrors both rules (date `min`/`max`, duplicate check).
 - **Settlement order is symmetric for branch-cash:** HO ack first + validator
   approval second → **approval auto-settles** the claim as PAID/cash using the
   ack's typed name (the approval was the last human in the chain). Approval
   first → the ack settles as before. While unsettled, the accounts email for a
   bankless claim says "to be settled in cash — do not pay by bank", and
   `settle_` refuses `method` bank on a claim with no account number.
+- **Rejection safety net:** if a branch-cash claim is **rejected**, the till
+  cash is already spent — so rejecting it emails `email.locumHandling` ("cash
+  already paid for a rejected claim — recover or re-raise"), and the orphaned
+  cash entry **resurfaces as a live flag** on any corrected resubmission
+  (the flag skips entries linked to a still-live claim, but not to a rejected
+  one). Without this the money would vanish from tracking and a clean
+  resubmission could be bank-paid on top of the cash.
 - **P&L rule (for the future pipeline — do not double-count):** the **Claims
   tab is the locum cost record** — it has the per-month split
   (`monthsJson`/`totalHours`/`totalAmount`), and a cash-settled claim keeps

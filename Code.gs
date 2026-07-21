@@ -387,6 +387,8 @@ function submit_(pl) {
     if (days.length) { days.sort(function (a, b) { return a - b; }); months.push({ label: m.label, days: days, hours: hours }); }
   });
   if (!dayKeys.length) return { ok: false, errors: ['Tick at least one day'] };
+  totalHours = Math.round(totalHours * 100) / 100;
+  totalAmount = Math.round(totalAmount * 100) / 100; // store money at 2dp, not accumulated float noise
 
   // flags (mirrored in index.html): duplicate days + bank-details-changed
   var flags = [];
@@ -449,15 +451,24 @@ function submit_(pl) {
 // entry) and 'branch-hopays' (head office pays the locum by bank).
 // ---------------------------------------------------------------------------
 function parseLocumDays_(list) {
-  var byMonth = {}, order = [], totalHours = 0, dayKeys = [];
+  var byMonth = {}, order = [], totalHours = 0, dayKeys = [], bad = [], dupes = [];
+  var now = Date.now();
+  var maxT = now + 2 * 864e5;          // up to +2 days (timezone slack), never further ahead
+  var minT = now - 185 * 864e5;        // ~6 months back — generous for late paperwork
   (list || []).forEach(function (d) {
-    var m = String(d.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    var raw = String(d.date || '');
+    var m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     var hh = Number(d.hours);
-    if (!m || Number(m[2]) < 1 || Number(m[2]) > 12 || !(hh > 0 && hh <= 24)) return;
-    var label = MONTHS_[Number(m[2]) - 1] + ' ' + m[1];
+    if (!m || !(hh > 0 && hh <= 24)) { if (raw || d.hours != null) bad.push(raw || '(blank date)'); return; }
+    var y = Number(m[1]), mo = Number(m[2]), day = Number(m[3]);
+    // real calendar day? (round-trips through Date — rejects 2026-02-31, day 00/99, month 13)
+    var dt = new Date(y, mo - 1, day);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== day) { bad.push(raw); return; }
+    var t = Date.UTC(y, mo - 1, day);
+    if (t > maxT || t < minT) { bad.push(raw); return; } // future / far-past typo (e.g. 2062)
+    var label = MONTHS_[mo - 1] + ' ' + y;
     if (!byMonth[label]) { byMonth[label] = { label: label, days: [], hours: {} }; order.push(label); }
-    var day = Number(m[3]);
-    if (byMonth[label].hours[String(day)]) return; // same day listed twice: keep first
+    if (byMonth[label].hours[String(day)] != null) { dupes.push(raw); return; } // same day twice — do NOT silently drop
     byMonth[label].days.push(day); byMonth[label].hours[String(day)] = hh;
     totalHours += hh; dayKeys.push(label + '|' + day);
   });
@@ -465,7 +476,15 @@ function parseLocumDays_(list) {
     byMonth[l].days.sort(function (a, b) { return a - b; });
     return byMonth[l];
   });
-  return { months: months, totalHours: totalHours, dayKeys: dayKeys };
+  return { months: months, totalHours: Math.round(totalHours * 100) / 100, dayKeys: dayKeys, bad: bad, dupes: dupes };
+}
+// One place to turn parsed-day problems into user errors — shared by the two
+// callers so the page and server never disagree about which days count.
+function locumDayErrors_(parsed) {
+  var e = [];
+  if (parsed.dupes.length) e.push('These days are entered more than once: ' + parsed.dupes.join(', ') + '. Put each day on a single row.');
+  if (parsed.bad.length) e.push('These dates look wrong — check the day, the year, and that it is recent: ' + parsed.bad.join(', ') + '.');
+  return e;
 }
 
 // opts: {origin, rate, totalAmount, bank:{name,sort,acct}|null, cashRef}
@@ -486,8 +505,14 @@ function branchClaimCore_(pl, c, opts) {
   }
   if (v && pl.locumEmail && v.email.toLowerCase().trim() === String(pl.locumEmail).toLowerCase().trim())
     errs.push('The approver’s email is the locum’s own — someone else has to approve.');
+  // submitter ≠ approver: the person raising the claim cannot also be the one
+  // who validates it (identity is typed names here, same basis as the rest of
+  // the system). Closes the raise-and-self-approve hole on the branch path.
+  if (v && String(pl.manager || '').toLowerCase().trim() === String(v.name).toLowerCase().trim())
+    errs.push('You cannot approve a claim you raised — pick a different approver.');
   var parsed = parseLocumDays_(pl.locumDays);
-  if (!parsed.dayKeys.length) errs.push('At least one worked day with hours');
+  errs = errs.concat(locumDayErrors_(parsed));
+  if (!parsed.dayKeys.length && !parsed.bad.length && !parsed.dupes.length) errs.push('At least one worked day with hours');
   if (errs.length) return { ok: false, errors: errs };
 
   // duplicate-days tripwire: by email when we have one, else by name — the
@@ -545,6 +570,13 @@ function branchClaimCore_(pl, c, opts) {
     parsed.totalHours + ' hours, £' + money_(opts.totalAmount) + '.\n' +
     (opts.origin === 'branch-cash' ? 'It records the cash you were already paid.' : 'You will get an email when it is approved and when the money is sent.') +
     '\nIf this is wrong, contact head office.');
+  // independent oversight: a claim raised in someone else's name always pings
+  // head office too, so the tripwire does not depend on the locum having (or
+  // reading) an email — the case an insider would exploit
+  sendMail_(c.emails.locumHandling, 'Claim ' + ref + ' raised on a locum’s behalf at ' + pl.pharmacy,
+    pl.manager + ' raised claim ' + ref + ' for ' + pl.person + ' — ' + parsed.totalHours + 'h, £' + money_(opts.totalAmount) + ', ' +
+    (opts.origin === 'branch-cash' ? 'cash already paid at the branch' : 'head office to pay by bank') + '. Approver: ' + v.name + '.' +
+    (email ? '' : '\nNo locum email on file — verify this payment is genuine.'));
   return { ok: true, ref: ref, totalHours: parsed.totalHours, totalAmount: opts.totalAmount, validator: v.name, flags: flags };
 }
 
@@ -573,9 +605,14 @@ function cashFlagsForClaim_(r) {
   var flags = [];
   rows_('Cash Log', CASH_COLS).forEach(function (x) {
     if (!isLocumCat_(x.category) || x.status === 'QUERIED') return;
-    // an entry hard-linked to a DIFFERENT claim is already accounted for —
-    // flagging it on every later claim by the same locum is pure noise
-    if (x.claimRef && String(x.claimRef).toUpperCase() !== String(r.ref).toUpperCase()) return;
+    if (x.claimRef && String(x.claimRef).toUpperCase() !== String(r.ref).toUpperCase()) {
+      // an entry hard-linked to a DIFFERENT claim is normally accounted for and
+      // flagging it on every later claim by the same locum is noise — BUT if
+      // that other claim was REJECTED the cash is unbacked again, so let it
+      // resurface here so a corrected resubmission still sees it
+      var other = findByRef_('Claims', CLAIM_COLS, x.claimRef);
+      if (other && other.status !== 'REJECTED') return;
+    }
     var linked = String(x.claimRef || '').toUpperCase() === String(r.ref).toUpperCase();
     var sameLocum = x.locumEmail && String(x.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase();
     if (linked || sameLocum)
@@ -635,6 +672,19 @@ function decide_(p) {
     sendMail_(r.locumEmail, 'Your claim ' + r.ref + ' was not approved',
       r.validatorName + ' rejected claim ' + r.ref + ' with this reason:\n\n' + p.reason + '\n\nFix it and submit a fresh claim.');
     sendMail_(r.validatorEmail, 'Receipt: you rejected claim ' + r.ref, 'For your records. Reason given:\n' + p.reason);
+    // if cash was already paid against this claim, rejecting it leaves the money
+    // UNBACKED — the till is short and no state tracks that. Tell head office so
+    // it is recovered or re-raised, and unlink the entry so a corrected claim's
+    // live cash flag resurfaces it (cashFlagsForClaim_ ignores rejected links).
+    var paidEntry = r.cashEntryRef ? findByRef_('Cash Log', CASH_COLS, r.cashEntryRef) : null;
+    if (!paidEntry) paidEntry = rows_('Cash Log', CASH_COLS).filter(function (x) {
+      return isLocumCat_(x.category) && x.status !== 'QUERIED' && String(x.claimRef).toUpperCase() === String(r.ref).toUpperCase();
+    })[0] || null;
+    if (paidEntry) {
+      sendMail_(c.emails.locumHandling, 'Cash already paid for REJECTED claim ' + r.ref,
+        'Claim ' + r.ref + ' (' + r.locumName + ', £' + money_(r.totalAmount) + ') was just rejected by ' + r.validatorName + ', but £' + money_(paidEntry.amount) +
+        ' cash was already paid at ' + paidEntry.pharmacy + ' (entry ' + paidEntry.ref + ').\nRecover the cash or re-raise a corrected claim — do not let this lapse.');
+    }
     return { ok: true, ref: r.ref, status: 'REJECTED', locum: r.locumName };
   }
 
@@ -652,6 +702,7 @@ function decide_(p) {
   var settledEntry = rows_('Cash Log', CASH_COLS).filter(function (x) {
     return isLocumCat_(x.category) && x.status === 'ACKNOWLEDGED' && x.ackBy &&
       String(x.claimRef).toUpperCase() === String(r.ref).toUpperCase() &&
+      String(x.pharmacy) === String(r.pharmacy) &&
       Math.abs(Number(x.amount) - Number(r.totalAmount)) <= 0.005;
   })[0];
   if (settledEntry) {
@@ -702,13 +753,16 @@ function settle_(p) {
     var paidByTxt = p.by;
     if (cash) {
       // hard-link the till record: exactly one unlinked locum cash entry for
-      // this locum → stamp it with the claim ref AND name it in paidBy, so the
-      // trail reads both ways from sheet data alone (same shape as the
-      // cash-ack path). Ambiguous (0 or 2+) stays flag-only.
-      var cand = rows_('Cash Log', CASH_COLS).filter(function (x) {
-        return isLocumCat_(x.category) && !x.claimRef && x.status !== 'QUERIED' &&
-          String(x.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase();
-      });
+      // this locum whose amount matches → stamp it with the claim ref AND name
+      // it in paidBy, so the trail reads both ways from sheet data alone.
+      // Require a non-blank email on BOTH sides and a matching amount, or a
+      // blank/wrong-amount row could be silently mislinked. Ambiguous stays
+      // flag-only.
+      var cand = r.locumEmail ? rows_('Cash Log', CASH_COLS).filter(function (x) {
+        return isLocumCat_(x.category) && !x.claimRef && x.status !== 'QUERIED' && x.locumEmail &&
+          String(x.locumEmail).toLowerCase() === String(r.locumEmail).toLowerCase() &&
+          Math.abs(Number(x.amount) - Number(r.totalAmount)) <= 0.005;
+      }) : [];
       if (cand.length === 1) {
         writeCell_('Cash Log', cand[0]._row, CASH_COLS, 'claimRef', r.ref);
         writeCell_('Claims', r._row, CLAIM_COLS, 'cashEntryRef', cand[0].ref);
@@ -847,8 +901,12 @@ function cashLog_(pl) {
     // no existing claim = the branch fills the worked days HERE and a claim is
     // raised on the locum's behalf (spec §6b) — if the locum could have
     // submitted one, the payment wouldn't be coming through this route
-    if (!pl.claimRef && !parseLocumDays_(pl.locumDays).dayKeys.length)
-      errs.push('The days they worked, with hours — or link their claim reference');
+    if (!pl.claimRef) {
+      var pd = parseLocumDays_(pl.locumDays);
+      errs = errs.concat(locumDayErrors_(pd));
+      if (!pd.dayKeys.length && !pd.bad.length && !pd.dupes.length)
+        errs.push('The days they worked, with hours — or link their claim reference');
+    }
   }
   if (pl.paidFrom === 'pocket' && pl.payerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pl.payerEmail))
     errs.push('A valid email for the person owed (or leave it blank)');
@@ -907,7 +965,12 @@ function cashLog_(pl) {
   row.fromTill = pl.paidFrom === 'till'; row.paidFrom = pl.paidFrom;
   row.payerEmail = pl.payerEmail || ''; row.emergency = !!pl.emergency;
   row.requestRef = req ? req.ref : '';
-  row.claimRef = raised ? raised.ref : (loc.claim ? loc.claim.ref : (pl.claimRef ? String(pl.claimRef).trim().toUpperCase() : ''));
+  // only locum-category entries carry a claim ref — a claim ref on any other
+  // category is ignored, so it can never settle a claim through the back door
+  row.claimRef = raised ? raised.ref
+    : (isLocumCat_(pl.category) && loc.claim) ? loc.claim.ref
+    : (isLocumCat_(pl.category) && pl.claimRef) ? String(pl.claimRef).trim().toUpperCase()
+    : '';
   row.locumEmail = (pl.locumEmail || (loc.claim ? loc.claim.locumEmail : '') || '').toLowerCase();
   row.receiptUrl = receiptUrl; row.notes = pl.notes || ''; row.flagsJson = JSON.stringify(flags);
   row.person = pl.person || ''; row.role = pl.role || ''; row.gphc = pl.gphc || ''; row.rtw = !!pl.rtw;
@@ -980,9 +1043,14 @@ function cashDecide_(p) {
     // so it needs a typed name (same non-repudiation rule as accounts' Paid).
     // Amount mismatch = NO auto-settle: the entry is recorded, the claim stays
     // with accounts, who see the mismatch flag and decide with full context.
-    var claim = r.claimRef ? findByRef_('Claims', CLAIM_COLS, r.claimRef) : null;
+    // only a locum-category entry can settle a claim (a 'sundries' row citing a
+    // claim ref must never move it), and only for the SAME pharmacy — otherwise
+    // one branch could tick another branch's approved claim as paid-in-cash and
+    // suppress the real bank payment
+    var claim = (isLocumCat_(r.category) && r.claimRef) ? findByRef_('Claims', CLAIM_COLS, r.claimRef) : null;
     var amountOk = claim && Math.abs(Number(claim.totalAmount) - Number(r.amount)) <= 0.005;
-    var settles = claim && claim.status === 'APPROVED' && amountOk;
+    var pharmacyOk = claim && String(claim.pharmacy) === String(r.pharmacy);
+    var settles = claim && claim.status === 'APPROVED' && amountOk && pharmacyOk;
     if (settles && !p.by) return { ok: false, message: 'Your name is required — acknowledging this marks claim ' + claim.ref + ' as paid in cash.' };
     // any payment to a person carries a name, settling or not
     if (isLocumCat_(r.category) && !p.by) return { ok: false, message: 'Your name is required — this entry pays a person.' };
@@ -1107,11 +1175,15 @@ function cashReqStatus_(refsCsv) {
       writeCell_('Cash Requests', q._row, REQ_COLS, 'status', 'LAPSED');
       q.status = 'LAPSED';
     }
+    // This endpoint is tokenless (a branch device polls the refs it created),
+    // so it must leak nothing sensitive: refs are only 5 chars and enumerable.
+    // Return the outcome the branch needs — NOT the decider's name or the
+    // verbatim rejection reason (those reach the requester by email, and would
+    // otherwise be harvestable across every branch in the estate).
     out.push({
       ref: q.ref, status: q.status, category: q.category, estAmount: q.estAmount,
       cap: q.cap === '' || q.cap == null ? null : Number(q.cap),
-      decidedBy: q.decidedBy, decidedAt: q.decidedAt, decideReason: q.decideReason,
-      linkedCashRef: q.linkedCashRef
+      spent: q.linkedCashRef ? true : false
     });
   });
   return { ok: true, requests: out };

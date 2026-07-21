@@ -182,6 +182,22 @@ fullPage). Demo tokens print to the browser console where applicable.
   exists); `submittedBy` recorded; self-approval + duplicate-days checks run
   (duplicates by email, or by NAME when no email); bankless claims cannot be
   bank-paid.
+- **Gap-hunt hardening (21 Jul 2026, 5-lens adversarial review):** fixed —
+  `parseLocumDays_` rejects impossible/typo dates (real-calendar + not future /
+  not >6mo old) and duplicate day-rows (no more silent hour-drop; page mirrors
+  both); manager-who-raised ≠ approver on the on-behalf path; branch-raised
+  claims always ping `locumHandling` (tripwire independent of the locum's
+  email); settle-as-cash back-fill now requires matching amount + non-blank
+  email both sides; a claimRef only settles from a **locum-category entry at the
+  same pharmacy and amount** (blocks cross-branch / wrong-category claim
+  hijack); rejecting a branch-cash claim alerts HO the till cash is unbacked and
+  resurfaces the orphaned entry on any resubmission; tokenless `cashReqStatus_`
+  no longer returns decider name or verbatim reason; money stored at 2dp. Tests
+  162→178. Known-but-unfixed (deliberate, tracked, revisit before wider
+  rollout): no validator-reassignment path; partial/split payments; single
+  30-day token expiry on APPROVED/PENDING/OWED; public-endpoint email-relay/DoS
+  + 5-char ref guessability (architectural — token-as-credential); plus-alias
+  self-approval tripwire (documented).
 - **Stock transfer:** phone/WhatsApp coordination stays exactly as it is —
   the app only records what moved (~20s form) + one-tap receive. No request/
   broadcast/approval workflow, no WhatsApp bot (official API costs per

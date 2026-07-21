@@ -337,12 +337,22 @@ function legacyLocumRow(env, over) {
   env.dataSheets()['Cash Log'].appendRow(s.CASH_COLS.map((k) => row[k]));
   return row;
 }
+// Two worked days in different, recent months — computed relative to "now" so
+// the new date-window check in parseLocumDays_ stays green whenever tests run.
+function recentDays() {
+  const now = new Date();
+  const cur = new Date(now.getFullYear(), now.getMonth(), Math.min(10, now.getDate()));
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  return { cur: iso(cur), prev: iso(prev) };
+}
+const RD = recentDays();
 function behalfCash(over) {
   return baseCash(Object.assign({
     category: 'Locum / casual staff (cash)', amount: 120, reason: 'Sat cover',
     person: 'Jane Locum', role: 'Dispenser', rtw: true,
     locumEmail: 'jane@test.co', locumPhone: '07123456789', validatorName: 'Sam Okafor',
-    locumDays: [{ date: '2026-07-18', hours: 8 }, { date: '2026-06-30', hours: 4 }],
+    locumDays: [{ date: RD.cur, hours: 8 }, { date: RD.prev, hours: 4 }],
   }, over || {}));
 }
 function cashToken(env, ref) {
@@ -663,7 +673,7 @@ function cashToken(env, ref) {
   ok(r.ok && r.flags.some((f) => /No email on file/.test(f)), 'no-email locum accepted + flagged');
   ok(!sent.some((m) => !m.to), 'nothing ever sent to a blank address');
   const r2 = s.cashLog_(behalfCash({ locumEmail: '', reason: 'again', date: '2026-07-19', amount: 60,
-    locumDays: [{ date: '2026-07-18', hours: 6 }] }));
+    locumDays: [{ date: RD.cur, hours: 6 }] }));
   ok(r2.ok && r2.flags.some((f) => /Same days as claim/.test(f)), 'duplicate day caught by NAME when no email');
   ok(s.cashLog_(behalfCash({ validatorName: 'Inactive Val', date: '2026-07-16' })).ok === false,
     'inactive approver rejected on the on-behalf path');
@@ -685,6 +695,92 @@ function cashToken(env, ref) {
   ok(aMail && /ready to pay/.test(aMail.subject) && aMail.body.indexOf('01235678') >= 0, 'accounts asked to pay by bank');
   const paid = s.settle_({ token: tokenFor(env, q.ref, 'accounts'), action: 'paid', by: 'Pat' });
   ok(paid.ok && s.findByRef_('Claims', s.CLAIM_COLS, q.ref).paidMethod === 'bank', 'paid by bank as normal');
+}
+
+// --- gap-hunt fixes: date sanity, dup days, manager≠approver, tripwire ------
+{
+  const env = build(); const { s, sent } = env;
+  // bug #1: same day entered twice must NOT silently drop hours — it errors
+  const dup = s.cashLog_(behalfCash({ locumDays: [{ date: RD.cur, hours: 4 }, { date: RD.cur, hours: 4 }] }));
+  ok(dup.ok === false && dup.errors.some((e2) => /more than once/.test(e2)), 'duplicate same-day rows rejected, not silently summed to one');
+  // bug #2: typo year / impossible date rejected, never reaches monthsJson
+  ok(s.cashLog_(behalfCash({ locumDays: [{ date: '2062-07-18', hours: 8 }] })).errors.some((e2) => /look wrong/.test(e2)), 'far-future year rejected');
+  ok(s.branchClaim_(behalfCash({ rate: 15, sort: '071234', acct: '01235678', acct2: '01235678', bankName: 'X',
+    locumDays: [{ date: '2026-02-31', hours: 8 }] })).errors.some((e2) => /look wrong/.test(e2)), 'impossible calendar date rejected on HO-pays too');
+  // bug #3: the manager who raised it cannot also be the approver
+  ok(s.cashLog_(behalfCash({ manager: 'Sam Okafor' })).errors.some((e2) => /cannot approve a claim you raised/.test(e2)),
+    'manager == approver blocked on the on-behalf path');
+  // tripwire: head office is pinged even when the locum has no email
+  sent.length = 0;
+  s.cashLog_(behalfCash({ locumEmail: '' }));
+  ok(sent.some((m) => m.to === 'desk@test.co' && /raised on a locum’s behalf/.test(m.subject)), 'branch-raised claim always notifies head office');
+}
+
+// --- bug #4: settlement guards (amount, blank email, category, pharmacy) -----
+{
+  const env = build(); const { s } = env;
+  // amount-mismatched legacy entry must NOT be auto-linked at settle
+  const cash = legacyLocumRow(env, { amount: 120, reason: 'part' });
+  const claim = s.submit_(basePl()); // total 275
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  s.settle_({ token: tokenFor(env, claim.ref, 'accounts'), action: 'paid', by: 'Pat', method: 'cash' });
+  ok(!cashRow(env, cash.ref).claimRef, 'settle-as-cash does NOT link a £120 entry to a £275 claim');
+}
+{
+  const env = build(); const { s } = env;
+  // blank-email legacy row must never be matched
+  const cash = legacyLocumRow(env, { amount: 275, locumEmail: '' });
+  const claim = s.submit_(basePl());
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  s.settle_({ token: tokenFor(env, claim.ref, 'accounts'), action: 'paid', by: 'Pat', method: 'cash' });
+  ok(!cashRow(env, cash.ref).claimRef, 'blank-email entry never mislinked at settle');
+}
+{
+  const env = build(); const { s } = env;
+  // a claim ref on a NON-locum category is ignored and can't settle the claim
+  const claim = s.submit_(basePl());
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  const r = s.cashLog_(baseCash({ category: 'Petty supplies', amount: 275, claimRef: claim.ref, reason: 'sundries', date: RD.cur }));
+  ok(r.ok && !cashRow(env, r.ref).claimRef, 'claimRef stripped from a non-locum entry');
+  s.cashDecide_({ token: cashToken(env, r.ref), action: 'ack' });
+  ok(s.findByRef_('Claims', s.CLAIM_COLS, claim.ref).status === 'APPROVED', 'non-locum ack cannot settle the claim');
+}
+{
+  const env = build(); const { s } = env;
+  // cross-pharmacy hijack blocked: entry at Riverside can't settle a High Street claim
+  const claim = s.submit_(basePl()); // High Street
+  s.decide_({ token: tokenFor(env, claim.ref, 'validator'), action: 'approve' });
+  const r = s.cashLog_(baseCash({ pharmacy: 'Riverside', category: 'Locum / casual staff (cash)', amount: 275,
+    person: 'Jane Locum', role: 'Dispenser', rtw: true, claimRef: claim.ref, reason: 'cash', date: RD.cur }));
+  const ack = s.cashDecide_({ token: cashToken(env, r.ref), action: 'ack', by: 'HO' });
+  ok(ack.ok && ack.settledClaim === '', 'entry from another pharmacy does not settle the claim');
+  ok(s.findByRef_('Claims', s.CLAIM_COLS, claim.ref).status === 'APPROVED', 'the real claim stays open for its own branch');
+}
+
+// --- regression #5: rejecting a branch-cash claim (cash already gone) --------
+{
+  const env = build(); const { s, sent } = env;
+  const r = s.cashLog_(behalfCash());
+  const clmRef = cashRow(env, r.ref).claimRef;
+  sent.length = 0;
+  s.decide_({ token: tokenFor(env, clmRef, 'validator'), action: 'reject', reason: 'hours wrong' });
+  ok(sent.some((m) => m.to === 'desk@test.co' && /Cash already paid for REJECTED/.test(m.subject)), 'rejecting a cash-backed claim alerts head office the money is unbacked');
+  // a corrected resubmission still sees the cash (flag resurfaces once the linked claim is REJECTED)
+  const claim2 = s.submit_(basePl({ email: 'jane@test.co', name: 'Jane Locum' }));
+  const v = s.claimGet_(tokenFor(env, claim2.ref, 'validator'));
+  ok(v.flags.some((f) => f.indexOf('Cash payment ' + r.ref) === 0), 'orphaned cash resurfaces on the corrected claim');
+}
+
+// --- regression #6: cashReqStatus_ leaks nothing sensitive, tokenless -------
+{
+  const env = build(); const { s } = env;
+  const rq = s.cashRequest_({ manager: 'M', pharmacy: 'High Street', category: 'Repairs / maintenance', amountKnown: true, estAmount: 40, reason: 'x' });
+  s.cashReqDecide_({ token: cashToken(env, rq.ref), action: 'cashreject', by: 'HO Person', reason: 'not this quarter — ask Dave' });
+  const st = s.cashReqStatus_(rq.ref);
+  const row = st.requests[0];
+  ok(row.status === 'REJECTED' && row.cap === null, 'status still returned to the branch device');
+  ok(!('decideReason' in row) && !('decidedBy' in row), 'verbatim reason + decider identity NOT leaked');
+  ok(!JSON.stringify(st).includes('Dave') && !JSON.stringify(st).includes('HO Person'), 'no names or reasons anywhere in the payload');
 }
 
 // --- admin save with the category matrix ------------------------------------
