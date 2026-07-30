@@ -15,9 +15,18 @@ function fakeSheet(rows) {
     _rows: rows,
     getDataRange() { return { getValues: () => this._rows }; },
     appendRow(arr) { this._rows.push(arr.slice()); },
-    getRange(row, col) {
+    getLastRow() { return this._rows.length; },
+    getRange(row, col, numRows, numCols) {
       const rows_ = this._rows;
-      return { setValue(v) { rows_[row - 1][col - 1] = v; } };
+      return {
+        setValue(v) { rows_[row - 1][col - 1] = v; },
+        setValues(vals) {
+          vals.forEach((r, i) => {
+            while (rows_.length < row - 1 + i + 1) rows_.push([]);
+            rows_[row - 1 + i] = r.slice();
+          });
+        },
+      };
     },
   };
 }
@@ -315,6 +324,28 @@ function ok(cond, name) {
   ok(JSON.stringify(auth.config).toLowerCase().indexOf('pinhash') === -1, 'session config never contains the pin hash');
   ok(auth.defaultPin === false, 'defaultPin false once pin changed off 0000');
   ok(s.checkSession_(auth.session) && s.checkSession_(auth.session).by === 'Moukik', 'checkSession_ resolves + slides');
+}
+
+// --- head office as a validator everywhere ----------------------------------
+{
+  const { s, cfgSheets } = build();
+  s.addHeadOfficeValidator();
+  const rows = cfgSheets.Validators._rows.slice(1);
+  const branches = cfgSheets.Pharmacies._rows.slice(1)
+    .filter((r) => r[1] === true || String(r[1]).toUpperCase() === 'TRUE').map((r) => String(r[0]));
+  const ho = rows.filter((r) => r[1] === 'Head office');
+  ok(ho.length === branches.length, 'head office added at every active branch');
+  ok(branches.every((b) => ho.some((r) => r[0] === b && r[3] === true)), 'and active at each of them');
+  ok(!rows.some((r) => r[1] === 'Head office' && !branches.includes(String(r[0]))), 'not added to inactive branches');
+
+  const before = rows.length;
+  s.addHeadOfficeValidator();
+  ok(cfgSheets.Validators._rows.slice(1).length === before, 're-running adds nothing (safe after onboarding)');
+
+  // the branch worked is still what gets recorded — head office only approves
+  const r = s.submit_(basePl({ validatorName: 'Head office' }));
+  ok(r.ok === true, 'a locum can pick head office as their validator');
+  ok(s.rows_('Claims', s.CLAIM_COLS)[0].pharmacy === 'High Street', 'the claim still belongs to the branch that was worked');
 }
 
 // --- per-day rates ----------------------------------------------------------

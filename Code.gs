@@ -696,6 +696,39 @@ function seedEstate() {
   Logger.log('Seeded ' + ESTATE.length + ' pharmacies + validators.');
 }
 
+// ---------------------------------------------------------------------------
+// Head office as a validator at EVERY branch. Regular pharmacists (Tahir,
+// Mariam, Janade, Hamza) have no branch manager who organised their shift, so
+// nobody local can approve them — head office does, off the RP log.
+//
+// Note this adds a VALIDATOR, not a pharmacy. The claim still records the
+// branch that was actually worked, which is what carries the cost through to
+// the P&L. A "Crest Pharmacies (Head Office)" pharmacy would have thrown that
+// attribution away.
+//
+// Idempotent — re-run after onboarding a branch. Run from the editor as owner.
+// ---------------------------------------------------------------------------
+function addHeadOfficeValidator() {
+  var NAME = 'Head office';
+  var EMAIL = 'moukik.cyber+val.lyeba@gmail.com'; // placeholder — real address is a go-live step
+  var ss = SpreadsheetApp.openById(PROPS.getProperty('CONFIG_SS_ID'));
+  var active = ss.getSheetByName('Pharmacies').getDataRange().getValues().slice(1)
+    .filter(function (r) { return r[0] && (r[1] === true || String(r[1]).toUpperCase() === 'TRUE'); })
+    .map(function (r) { return String(r[0]); });
+  var vs = ss.getSheetByName('Validators');
+  var already = {};
+  vs.getDataRange().getValues().slice(1).forEach(function (r) {
+    if (String(r[1]) === NAME) already[String(r[0])] = true;
+  });
+  var add = active.filter(function (p) { return !already[p]; })
+    .map(function (p) { return [p, NAME, EMAIL, true]; });
+  if (!add.length) { Logger.log('Head office is already a validator at every active branch.'); return; }
+  vs.getRange(vs.getLastRow() + 1, 1, add.length, 4).setValues(add);
+  logChange_('Head office added as a validator at ' + add.length + ' branch(es)', 'addHeadOfficeValidator()');
+  PROPS.deleteProperty('CONFIG_CACHE');
+  Logger.log('Added head office as a validator at: ' + add.join(', '));
+}
+
 function adminSave_(p) {
   if (!checkSession_(p.session)) return { ok: false, code: 'session' };
   var cfg = p.config, e = [];
