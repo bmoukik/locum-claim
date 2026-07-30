@@ -81,7 +81,32 @@ function build() {
     MailApp: { sendEmail: (o) => sent.push(o) },
     ContentService: { createTextOutput: (s) => ({ setMimeType: () => s }), MimeType: { JSON: 'json' } },
     LockService: {}, ScriptApp: {}, HtmlService: {}, Logger: { log: () => {} },
+    DriveApp: {
+      _files: {},
+      createFolder(name) { return this._folder(name, 'fold000000000000000000000000'); },
+      getFolderById(id) { return this._folder('Crest cash receipts', id); },
+      getFileById(id) {
+        const f = sandbox.DriveApp._files[id];
+        if (!f) throw new Error('no such file');
+        return { getBlob: () => f };
+      },
+      _folder(name, id) {
+        return {
+          getId: () => id, getName: () => name,
+          createFile(blob) {
+            const fid = 'file' + Object.keys(sandbox.DriveApp._files).length + 'aaaabbbbccccddddeeee';
+            sandbox.DriveApp._files[fid] = blob;
+            return { getUrl: () => 'https://drive.google.com/file/d/' + fid + '/view?usp=drivesdk' };
+          },
+        };
+      },
+    },
   };
+  sandbox.Utilities.newBlob = (bytes, type) => ({
+    getBytes: () => bytes, getContentType: () => type,
+  });
+  sandbox.Utilities.base64Decode = (s) => Array.from(Buffer.from(s, 'base64'));
+  sandbox.Utilities.base64Encode = (b) => Buffer.from(b).toString('base64');
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(__dirname + '/../Code.gs', 'utf8'), sandbox);
 
@@ -290,6 +315,41 @@ function ok(cond, name) {
   ok(JSON.stringify(auth.config).toLowerCase().indexOf('pinhash') === -1, 'session config never contains the pin hash');
   ok(auth.defaultPin === false, 'defaultPin false once pin changed off 0000');
   ok(s.checkSession_(auth.session) && s.checkSession_(auth.session).by === 'Moukik', 'checkSession_ resolves + slides');
+}
+
+// --- cash log receipts ------------------------------------------------------
+// The acknowledger has no access to the deploying account's Drive, so the
+// receipt has to travel inline. A Drive URL in an <img> is what broke before.
+{
+  const { s } = build();
+  const png = 'data:image/png;base64,' + Buffer.from('pretend-receipt-bytes').toString('base64');
+  const r = s.cashLog_({
+    manager: 'Elliot', pharmacy: 'Clay', category: 'Car wash', amount: 25,
+    date: '2026-07-30', reason: 'Van wash', fromTill: true, receipt: png,
+  });
+  ok(r.ok === true && r.status === 'PENDING', 'cash entry over threshold lands as PENDING');
+
+  const got = s.cashGet_(s.mintToken_('cash', r.ref, 'ack'));
+  ok(got.ok === true, 'ack token opens the entry');
+  ok(String(got.entry.receipt).indexOf('data:image/png;base64,') === 0, 'receipt travels inline, not as a Drive URL');
+  ok(got.entry.receipt === png, 'inlined bytes match what was uploaded');
+  ok(/drive\.google\.com/.test(got.entry.receiptUrl), 'Drive link still sent as the full-size fallback');
+  ok(Object.keys(s.DriveApp._files).length === 1, 'receipt written to the receipts folder');
+
+  // a deleted or unreadable receipt must not block the acknowledgement
+  s.DriveApp._files = {};
+  const gone = s.cashGet_(s.mintToken_('cash', r.ref, 'ack'));
+  ok(gone.ok === true && gone.entry.receipt === '', 'missing receipt degrades to empty, entry still openable');
+}
+{
+  const { s } = build();
+  const r = s.cashLog_({
+    manager: 'Elliot', pharmacy: 'Clay', category: 'Milk', amount: 25,
+    date: '2026-07-30', reason: 'Staff milk',
+  });
+  const got = s.cashGet_(s.mintToken_('cash', r.ref, 'ack'));
+  ok(got.ok === true && got.entry.receipt === '', 'no receipt attached is not an error');
+  ok(Object.keys(s.DriveApp._files).length === 0, 'no receipt means no Drive file');
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
