@@ -496,6 +496,27 @@ function cashMeta_() {
   };
 }
 
+// Receipts land in one folder so head office can browse them later, instead of
+// scattering across the Drive root.
+function receiptFolder_() {
+  var id = PROPS.getProperty('RECEIPT_FOLDER_ID');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) { } }
+  var f = DriveApp.createFolder('Crest cash receipts');
+  PROPS.setProperty('RECEIPT_FOLDER_ID', f.getId());
+  return f;
+}
+
+// Drive URL -> data URI. Returns '' for anything unreadable so a missing or
+// deleted receipt never blocks an acknowledgement.
+function receiptDataUri_(url) {
+  var m = String(url || '').match(/[-\w]{25,}/);
+  if (!m) return '';
+  try {
+    var b = DriveApp.getFileById(m[0]).getBlob();
+    return 'data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes());
+  } catch (e) { return ''; }
+}
+
 function cashLog_(pl) {
   var c = readConfig_();
   if (!pl.manager || !pl.pharmacy || !pl.category || !(pl.amount > 0) || !pl.date || !pl.reason)
@@ -506,7 +527,7 @@ function cashLog_(pl) {
   if (pl.receipt && pl.receipt.indexOf('data:') === 0) {
     try {
       var m = pl.receipt.match(/^data:([^;]+);base64,(.*)$/);
-      var f = DriveApp.createFile(Utilities.newBlob(Utilities.base64Decode(m[2]), m[1], ref + '-receipt'));
+      var f = receiptFolder_().createFile(Utilities.newBlob(Utilities.base64Decode(m[2]), m[1], ref + '-receipt'));
       receiptUrl = f.getUrl();
     } catch (e) { receiptUrl = ''; }
   }
@@ -538,7 +559,11 @@ function cashGet_(tok) {
   if (r.status === 'ACKNOWLEDGED' || r.status === 'QUERIED') return { ok: false, code: 'processed', ref: r.ref, status: r.status, decidedAt: r.ackAt };
   var entry = {};
   CASH_COLS.forEach(function (k) { entry[k] = r[k]; });
-  entry.receipt = r.receiptUrl; // page shows img or link
+  // The receipt file stays private to this account, so a Drive URL renders as a
+  // broken image (and "request access") for whoever is acknowledging. Send the
+  // bytes inline instead — they already hold a valid token for this entry.
+  entry.receiptUrl = r.receiptUrl;
+  entry.receipt = receiptDataUri_(r.receiptUrl);
   return { ok: true, entry: entry };
 }
 

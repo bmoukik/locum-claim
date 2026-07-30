@@ -198,15 +198,35 @@ function renderForm(){
   $('f_receipt').onchange=function(){
     var f=this.files&&this.files[0]; var box=$('receiptprev'); box.innerHTML='';
     if(!f) return;
-    var rd=new FileReader();
-    rd.onload=function(){ RECEIPT=rd.result; box.innerHTML='<img class="thumb" src="'+RECEIPT+'">'; };
-    rd.readAsDataURL(f);
+    box.innerHTML='<p class="hint">Getting the photo ready…</p>';
+    shrink(f,function(dataUri){
+      RECEIPT=dataUri;
+      box.innerHTML='<img class="thumb" src="'+RECEIPT+'">';
+    });
   };
   $('submitbtn').onclick=submit;
   updateThreshold();
 }
 
 var RECEIPT=null;
+// A phone photo is 3-5MB. Shrink it here or the upload crawls on branch wifi
+// and every receipt bloats Drive. 1600px is plenty to read a till receipt.
+function shrink(file,cb){
+  var rd=new FileReader();
+  rd.onload=function(){
+    var img=new Image();
+    img.onload=function(){
+      var max=1600,w=img.width,h=img.height;
+      if(w>max||h>max){var s=Math.min(max/w,max/h);w=Math.round(w*s);h=Math.round(h*s);}
+      var cv=document.createElement('canvas');cv.width=w;cv.height=h;
+      cv.getContext('2d').drawImage(img,0,0,w,h);
+      cb(cv.toDataURL('image/jpeg',0.82));
+    };
+    img.onerror=function(){cb(rd.result);}; // not something we can draw — send as-is
+    img.src=rd.result;
+  };
+  rd.readAsDataURL(file);
+}
 function updateThreshold(){
   var el=document.getElementById('thresholdhint'); if(!el)return;
   var amt=Number((document.getElementById('f_amount')||{}).value)||0;
@@ -301,7 +321,9 @@ function renderAck(token,c,errMsg){
     (loc?'<tr><td>Paid to</td><td>'+esc(c.person||'')+' ('+esc(c.role||'')+')'+(c.gphc?'<br>GPhC '+esc(c.gphc):'')+(c.rtw?'<br>Right to work confirmed':'')+'</td></tr>':'')+
     (c.notes?'<tr><td>Notes</td><td>'+esc(c.notes)+'</td></tr>':'')+
     '</table>'+
-    (c.receipt?'<h3>Receipt</h3><img class="thumb" src="'+esc(c.receipt)+'">':'<p class="hint" style="margin-top:12px">No receipt attached.</p>')+
+    (c.receipt?'<h3>Receipt</h3><img class="thumb" src="'+esc(c.receipt)+'">'
+      +(c.receiptUrl?'<p class="hint"><a href="'+esc(c.receiptUrl)+'" target="_blank">Open the full-size file</a></p>':'')
+      :'<p class="hint" style="margin-top:12px">No receipt attached.</p>')+
     '<button class="btn green" id="ackbtn">Acknowledge</button>'+
     '<details><summary>Query this entry…</summary>'+
     '<label>Reason (the manager sees this)</label>'+
