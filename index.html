@@ -37,6 +37,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);border-c
 .hourrow{display:flex;align-items:center;gap:12px;margin-top:10px}
 .hourrow .d{width:96px;font-weight:700;color:var(--navy-ink)}
 .hourrow input{width:120px}
+.hourrow.vr input{width:auto;flex:1 1 80px;min-width:0}
+.hourrow .cap{flex:1 1 80px;font-size:12.5px;font-weight:700;color:#59647d}
 .mblock{border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-top:14px;background:#FBFCFF}
 .err{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;border-radius:10px;padding:12px;margin:14px 0;display:none;font-size:14.5px;line-height:1.6}
 .btn{background:var(--navy);color:#fff;border:0;padding:16px;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;margin-top:22px;width:100%;font-family:inherit}
@@ -172,6 +174,7 @@ function renderForm(){
   '<div class="warn">Important: your payment cannot be processed unless the correct validator is selected. If unsure, ask the pharmacy.</div>'+
   '<label>Agreed rate (£ per hour)</label><input type="number" id="f_rate" step="0.01" min="1" inputmode="decimal">'+
   '<p class="hint">Enter the rate you agreed with the pharmacy — the validator checks it.</p>'+
+  '<div class="check"><input type="checkbox" id="f_varrate"><span>Some days were at a different rate (bank holiday, weekend, last-minute cover)</span></div>'+
   '<div id="months"></div>'+
   '<button type="button" class="btn2" id="addmonth">+ Add another month</button>'+
   '<div class="total" id="total"></div>'+
@@ -206,7 +209,8 @@ function renderForm(){
     $('gphc_wrap').style.display=(r==='Pharmacist')?'block':'none';
     $('other_wrap').style.display=(r==='Other')?'block':'none';
   };
-  $('f_rate').oninput=recalc;
+  $('f_rate').oninput=function(){fillBlankRates();recalc();};
+  $('f_varrate').onchange=setVarRate;
   $('addmonth').onclick=addMonthBlock;
   $('submitbtn').onclick=submit;
   addMonthBlock();
@@ -219,8 +223,9 @@ function addMonthBlock(){
   var opts=META.months.map(function(m){return '<option data-max="'+m.maxDay+'">'+esc(m.label)+'</option>'}).join('');
   div.innerHTML='<label style="margin-top:2px">Month</label><select id="mm'+i+'">'+opts+'</select>'+
     '<label>Tap every day you worked</label><div class="days" id="md'+i+'"></div>'+
-    '<div class="check" style="margin-top:14px"><input type="checkbox" id="sm'+i+'"><span><b>Same hours every day</b></span></div>'+
+    '<div class="check" style="margin-top:14px" id="smw'+i+'"><input type="checkbox" id="sm'+i+'"><span><b>Same hours every day</b></span></div>'+
     '<div id="sw'+i+'" style="display:none"><div class="hourrow"><span class="d">Hours per day</span><input type="number" id="sh'+i+'" step="0.25" min="0.25" max="24" placeholder="hours" inputmode="decimal"></div></div>'+
+    '<div class="hourrow" id="hdr'+i+'" style="display:none"><span class="d"></span><span class="cap">Hours</span><span class="cap">£ per hour</span></div>'+
     '<div id="mh'+i+'"></div>'+
     (i>0?'<button type="button" class="btn2" onclick="removeBlock('+i+')">Remove this month</button>':'');
   document.getElementById('months').appendChild(div);
@@ -231,7 +236,53 @@ function addMonthBlock(){
     recalc();
   };
   document.getElementById('sh'+i).oninput=recalc;
+  document.getElementById('smw'+i).style.display=VARRATE?'none':'block';
+  document.getElementById('hdr'+i).style.display=VARRATE?'flex':'none';
   buildDays(i);
+}
+// Per-day rates need one row per day, so the "same hours" shortcut steps aside
+// while they are on.
+var VARRATE=false;
+function setVarRate(){
+  VARRATE=document.getElementById('f_varrate').checked;
+  document.querySelectorAll('.mblock').forEach(function(div){
+    var i=div.id.slice(2);
+    var sm=document.getElementById('sm'+i);
+    if(VARRATE&&sm.checked){sm.checked=false;sm.onchange();}
+    document.getElementById('smw'+i).style.display=VARRATE?'none':'block';
+    document.getElementById('hdr'+i).style.display=VARRATE?'flex':'none';
+    rebuildRows(i);
+  });
+  recalc();
+}
+function defaultRate(){return (document.getElementById('f_rate')||{}).value||'';}
+// typing the agreed rate fills any day still left blank, so the common case is
+// "set the rate once, override the odd day"
+function fillBlankRates(){
+  if(!VARRATE)return;
+  document.querySelectorAll('.hourrow input.rt').forEach(function(inp){if(!inp.value)inp.value=defaultRate();});
+}
+function rowHtml(i,d){
+  return '<span class="d">'+ordinal(d)+'</span>'+
+    '<input type="number" id="h'+i+'_'+d+'" step="0.25" min="0.25" max="24" placeholder="hours" inputmode="decimal">'+
+    (VARRATE?'<input type="number" class="rt" id="rt'+i+'_'+d+'" step="0.01" min="1" placeholder="£/hr" inputmode="decimal">':'');
+}
+function bindRow(i,d){
+  var h=document.getElementById('h'+i+'_'+d);if(h)h.oninput=recalc;
+  var r=document.getElementById('rt'+i+'_'+d);if(r)r.oninput=recalc;
+}
+function rebuildRows(i){
+  var wrap=document.getElementById('mh'+i);
+  [].slice.call(wrap.children).forEach(function(row){
+    var d=Number(row.id.split('_')[1]);
+    var hv=(document.getElementById('h'+i+'_'+d)||{}).value||'';
+    var rv=(document.getElementById('rt'+i+'_'+d)||{}).value||'';
+    row.className='hourrow'+(VARRATE?' vr':'');
+    row.innerHTML=rowHtml(i,d);
+    document.getElementById('h'+i+'_'+d).value=hv;
+    if(VARRATE)document.getElementById('rt'+i+'_'+d).value=rv||defaultRate();
+    bindRow(i,d);
+  });
 }
 function removeBlock(i){var el=document.getElementById('mb'+i);el.parentNode.removeChild(el);recalc();}
 function buildDays(i){
@@ -249,12 +300,13 @@ function buildDays(i){
 function toggleHour(i,d,on){
   var wrap=document.getElementById('mh'+i);var id='h'+i+'_'+d;
   if(on){
-    var row=document.createElement('div');row.className='hourrow';row.id='r'+id;
-    row.innerHTML='<span class="d">'+ordinal(d)+'</span><input type="number" id="'+id+'" step="0.25" min="0.25" max="24" placeholder="hours" inputmode="decimal">';
+    var row=document.createElement('div');row.className='hourrow'+(VARRATE?' vr':'');row.id='r'+id;
+    row.innerHTML=rowHtml(i,d);
     var ins=null;[].slice.call(wrap.children).forEach(function(r){var dd=Number(r.id.split('_')[1]);if(dd>d&&!ins)ins=r;});
     wrap.insertBefore(row,ins);
-    var inp=document.getElementById(id);inp.oninput=recalc;
-    var prev=wrap.querySelector('input');if(prev&&prev.value&&!inp.value)inp.value=prev.value;
+    var inp=document.getElementById(id);bindRow(i,d);
+    var prev=wrap.querySelector('input:not(.rt)');if(prev&&prev.value&&!inp.value)inp.value=prev.value;
+    if(VARRATE)document.getElementById('rt'+i+'_'+d).value=defaultRate();
     inp.focus();
   } else { var row=document.getElementById('r'+id);if(row)row.parentNode.removeChild(row); }
   recalc();
@@ -268,7 +320,12 @@ function collectMonths(){
       var hrs=Number(document.getElementById('sh'+i).value);
       document.querySelectorAll('#md'+i+' .day.on').forEach(function(b){entries.push({day:Number(b.textContent),hours:hrs});});
     } else {
-      div.querySelectorAll('#mh'+i+' .hourrow input').forEach(function(inp){entries.push({day:Number(inp.id.split('_')[1]),hours:Number(inp.value)});});
+      div.querySelectorAll('#mh'+i+' .hourrow').forEach(function(row){
+        var d=Number(row.id.split('_')[1]);
+        var en={day:d,hours:Number((document.getElementById('h'+i+'_'+d)||{}).value)};
+        if(VARRATE){var rt=document.getElementById('rt'+i+'_'+d);en.rate=Number(rt&&rt.value);}
+        entries.push(en);
+      });
     }
     out.push({label:label,entries:entries,_same:same});
   });
@@ -276,9 +333,15 @@ function collectMonths(){
 }
 function recalc(){
   var el=document.getElementById('total');if(!el)return;
-  var rate=Number((document.getElementById('f_rate')||{}).value)||0;var th=0;
-  collectMonths().forEach(function(m){m.entries.forEach(function(e){if(e.hours>0)th+=e.hours});});
-  el.innerHTML=th?('<b>Total: '+th+' hours'+(rate?(' × £'+rate+'/hr = £'+money(th*rate)):'')+'</b>'):'';
+  var rate=Number((document.getElementById('f_rate')||{}).value)||0;
+  var th=0,amt=0,mixed=false;
+  collectMonths().forEach(function(m){m.entries.forEach(function(e){
+    if(!(e.hours>0))return;
+    var r=e.rate>0?e.rate:rate;
+    if(e.rate>0&&e.rate!==rate)mixed=true;
+    th+=e.hours;amt+=e.hours*r;
+  });});
+  el.innerHTML=th?('<b>Total: '+th+' hours'+(amt?(mixed?' = £'+money(amt)+' (rates vary by day)':' × £'+rate+'/hr = £'+money(amt)):'')+'</b>'):'';
 }
 function showErrors(msgs){
   var b=document.getElementById('errbox');
@@ -305,7 +368,11 @@ function submit(){
       var hh=m.entries.length?m.entries[0].hours:0;
       if(m.entries.length&&!(hh>0&&hh<=24))e.push('Hours per day ('+m.label+')');
     } else {
-      m.entries.forEach(function(en){anyDays=true;if(!(en.hours>0&&en.hours<=24))e.push('Hours for the '+ordinal(en.day)+' ('+m.label+')')});
+      m.entries.forEach(function(en){
+        anyDays=true;
+        if(!(en.hours>0&&en.hours<=24))e.push('Hours for the '+ordinal(en.day)+' ('+m.label+')');
+        if(VARRATE&&!(en.rate>0))e.push('Rate for the '+ordinal(en.day)+' ('+m.label+')');
+      });
     }
   });
   if(!anyDays&&months.length)e.push('Tick at least one day');
@@ -356,14 +423,18 @@ function claimSummary(c){
     return '<tr><td>'+esc(r.label)+'</td><td>'+r.daysCount+'</td><td>'+r.hours+'</td><td>£'+money(r.amount)+'</td></tr>';
   }).join('');
   var daysDetail=c.months.map(function(b){
-    var ds=b.days.map(function(d){return d+' ('+b.hours[String(d)]+'h)'}).join(', ');
+    var ds=b.days.map(function(d){
+      var rr=b.rates&&Number(b.rates[String(d)]);
+      // only spell out the rate on days that differ — otherwise it is noise
+      return d+' ('+b.hours[String(d)]+'h'+(rr&&rr!==Number(c.rate)?' @ £'+money(rr)+'/hr':'')+')';
+    }).join(', ');
     return '<p style="margin:4px 0"><b>'+esc(b.label)+':</b> '+esc(ds)+'</p>';
   }).join('');
   return '<table class="kv">'+
     '<tr><td>Locum</td><td><b>'+esc(c.locum.name)+'</b><br>'+esc(c.locum.email)+' · '+esc(c.locum.phone)+'</td></tr>'+
     '<tr><td>Role</td><td>'+esc(c.role)+(c.roleOther?' — '+esc(c.roleOther):'')+(c.gphc?'<br>GPhC '+esc(c.gphc):'')+'</td></tr>'+
     '<tr><td>Pharmacy</td><td>'+esc(c.pharmacy)+' ('+esc(c.company)+')</td></tr>'+
-    '<tr><td>Rate</td><td>£'+money(c.rate)+'/hr</td></tr>'+
+    '<tr><td>Rate</td><td>£'+money(c.rate)+'/hr'+(c.rateMixed?'<br><b>Some days were claimed at a different rate</b> — see the day list below.':'')+'</td></tr>'+
     '<tr><td>Total</td><td><b>£'+money(c.split.totalAmount)+'</b> · '+c.split.totalHours+' hours</td></tr>'+
     (c.notes?'<tr><td>Notes</td><td>'+esc(c.notes)+'</td></tr>':'')+
     '</table>'+
@@ -575,19 +646,22 @@ function demoHandle(method,p){
       return {ok:false, errors:['The validator you picked uses the same email address as you. Someone else has to approve your claim — pick a different validator, or ask head office.']};
     }
     // --- build the month split ---
-    var months=[], rows=[], totalHours=0, totalAmount=0, dayKeys=[];
+    var months=[], rows=[], totalHours=0, totalAmount=0, dayKeys=[], mixedRates=false;
     (pl.months||[]).forEach(function(m){
-      var hours={}, days=[], mh=0;
+      var hours={}, rates={}, days=[], mh=0, ma=0;
       m.entries.forEach(function(en){
         if(!(en.hours>0)) return;
-        days.push(en.day); hours[String(en.day)]=en.hours; mh+=en.hours;
+        var rr=en.rate>0?en.rate:pl.rate;
+        if(rr!==pl.rate) mixedRates=true;
+        days.push(en.day); hours[String(en.day)]=en.hours; rates[String(en.day)]=rr;
+        mh+=en.hours; ma+=en.hours*rr;
         dayKeys.push(m.label+'|'+en.day);
       });
       if(!days.length) return;
       days.sort(function(a,b){return a-b;});
-      months.push({label:m.label, days:days, hours:hours});
-      rows.push({label:m.label, daysCount:days.length, hours:mh, amount:mh*pl.rate});
-      totalHours+=mh; totalAmount+=mh*pl.rate;
+      months.push({label:m.label, days:days, hours:hours, rates:rates});
+      rows.push({label:m.label, daysCount:days.length, hours:mh, amount:ma});
+      totalHours+=mh; totalAmount+=ma;
     });
     // --- flags: mirrored in BACKEND_SPEC.md ---
     var flags=[], hist=lsGet('lc_history')||[];
@@ -612,7 +686,7 @@ function demoHandle(method,p){
       locum:{name:pl.name, email:pl.email, phone:pl.phone},
       role:pl.role, roleOther:pl.roleOther, gphc:pl.gphc,
       pharmacy:pl.pharmacy, company:'Crest Pharmacies', validatorName:pl.validatorName,
-      validatorEmail:(v&&v.email)||'', rate:pl.rate, months:months,
+      validatorEmail:(v&&v.email)||'', rate:pl.rate, rateMixed:mixedRates, months:months,
       split:{rows:rows, totalHours:totalHours, totalAmount:totalAmount},
       bank:{name:pl.bankName, sort:pl.sort, acct:pl.acct},
       notes:pl.notes, flags:flags, submittedAt:new Date().toISOString()};

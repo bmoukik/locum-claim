@@ -297,6 +297,16 @@ function submit_(pl) {
   if (!pl.role) errs.push('Role');
   if (pl.role === 'Pharmacist' && !/^\d{7}$/.test(pl.gphc || '')) errs.push('GPhC number (7 digits)');
   if (!(pl.rate > 0)) errs.push('Rate');
+  // a day may carry its own rate (bank holiday, last-minute cover). Reject a
+  // bad one rather than quietly falling back to the agreed rate — that would
+  // pay the wrong amount without anyone seeing it.
+  var badRate = false;
+  (pl.months || []).forEach(function (m) {
+    (m.entries || []).forEach(function (en) {
+      if (en.rate !== undefined && en.rate !== '' && !(Number(en.rate) > 0)) badRate = true;
+    });
+  });
+  if (badRate) errs.push('A rate above 0 for every day that has its own rate');
   if (!/^\d{6}$/.test(pl.sort || '')) errs.push('Sort code (6 digits)');
   if (!/^\d{8}$/.test(pl.acct || '')) errs.push('Account number (8 digits)');
   if (pl.acct !== pl.acct2) errs.push('Account numbers must match');
@@ -311,18 +321,21 @@ function submit_(pl) {
     return { ok: false, errors: ['The validator you picked uses the same email address as you. Someone else has to approve your claim — pick a different validator, or ask head office.'] };
   }
 
-  // month split
-  var months = [], totalHours = 0, totalAmount = 0, dayKeys = [];
+  // month split. Each day carries the rate it was actually worked at — the
+  // agreed rate unless that day was priced differently.
+  var months = [], totalHours = 0, totalAmount = 0, dayKeys = [], mixedRates = false;
   (pl.months || []).forEach(function (m) {
-    var hours = {}, days = [];
+    var hours = {}, rates = {}, days = [];
     (m.entries || []).forEach(function (en) {
       var hh = Number(en.hours);
       if (!(hh > 0 && hh <= 24)) return;
-      days.push(Number(en.day)); hours[String(en.day)] = hh;
-      totalHours += hh; totalAmount += hh * pl.rate;
+      var rr = Number(en.rate) > 0 ? Number(en.rate) : Number(pl.rate);
+      if (rr !== Number(pl.rate)) mixedRates = true;
+      days.push(Number(en.day)); hours[String(en.day)] = hh; rates[String(en.day)] = rr;
+      totalHours += hh; totalAmount += hh * rr;
       dayKeys.push(m.label + '|' + en.day);
     });
-    if (days.length) { days.sort(function (a, b) { return a - b; }); months.push({ label: m.label, days: days, hours: hours }); }
+    if (days.length) { days.sort(function (a, b) { return a - b; }); months.push({ label: m.label, days: days, hours: hours, rates: rates }); }
   });
   if (!dayKeys.length) return { ok: false, errors: ['Tick at least one day'] };
 
@@ -365,7 +378,8 @@ function submit_(pl) {
   var link = webUrl_() + '?token=' + vtok;
   sendMail_(v.email, 'Locum claim ' + ref + ' — waiting for your approval',
     pl.name + ' has submitted claim ' + ref + ' for ' + pl.pharmacy + '.\n' +
-    totalHours + ' hours at £' + money_(pl.rate) + '/hr = £' + money_(totalAmount) + '.\n' +
+    totalHours + ' hours at ' + (mixedRates ? 'more than one rate' : '£' + money_(pl.rate) + '/hr') + ' = £' + money_(totalAmount) + '.\n' +
+    (mixedRates ? 'Some days were claimed at a different rate — the per-day rates are on the review page.\n' : '') +
     (flags.length ? '\nCheck these before you go on:\n- ' + flags.join('\n- ') + '\n' : '') +
     '\nReview and approve or reject:\n' + link + '\n\n' +
     'Nothing is paid until you approve. Bank details are not shown to you — accounts receive them after your approval.');
@@ -378,16 +392,24 @@ function submit_(pl) {
 
 function claimView_(r, view) {
   var months = JSON.parse(r.monthsJson || '[]');
+  var mixed = false;
   var rows = months.map(function (m) {
-    var hh = 0; m.days.forEach(function (d) { hh += m.hours[String(d)]; });
-    return { label: m.label, daysCount: m.days.length, hours: hh, amount: hh * Number(r.rate) };
+    var hh = 0, amt = 0;
+    m.days.forEach(function (d) {
+      var h = Number(m.hours[String(d)]) || 0;
+      // claims submitted before per-day rates existed have no rates map
+      var rr = (m.rates && Number(m.rates[String(d)])) || Number(r.rate);
+      if (rr !== Number(r.rate)) mixed = true;
+      hh += h; amt += h * rr;
+    });
+    return { label: m.label, daysCount: m.days.length, hours: hh, amount: amt };
   });
   var o = {
     ok: true, view: view, ref: r.ref, status: r.status,
     locum: { name: r.locumName, email: r.locumEmail, phone: r.locumPhone },
     role: r.role, roleOther: r.roleOther, gphc: r.gphc,
     pharmacy: r.pharmacy, company: COMPANY, validatorName: r.validatorName,
-    rate: Number(r.rate), months: months,
+    rate: Number(r.rate), rateMixed: mixed, months: months,
     split: { rows: rows, totalHours: Number(r.totalHours), totalAmount: Number(r.totalAmount) },
     flags: JSON.parse(r.flagsJson || '[]'), notes: r.notes
   };

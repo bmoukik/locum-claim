@@ -317,6 +317,50 @@ function ok(cond, name) {
   ok(s.checkSession_(auth.session) && s.checkSession_(auth.session).by === 'Moukik', 'checkSession_ resolves + slides');
 }
 
+// --- per-day rates ----------------------------------------------------------
+// Cover is not always priced the same: bank holiday, weekend, last-minute.
+{
+  const { s, sent } = build();
+  const r = s.submit_(basePl({
+    rate: 22,
+    months: [{ label: 'July 2026', entries: [{ day: 15, hours: 8 }, { day: 16, hours: 8, rate: 30 }] }],
+  }));
+  ok(r.ok === true, 'submit_ accepts a day priced off the agreed rate');
+  ok(r.total === '416.00', 'totals per day: 8×22 + 8×30 = £416.00, not 16×22');
+
+  const row = JSON.parse(s.rows_('Claims', s.CLAIM_COLS)[0].monthsJson)[0];
+  ok(row.rates['15'] === 22 && row.rates['16'] === 30, 'each day stores the rate it was worked at');
+
+  const view = s.claimView_(s.rows_('Claims', s.CLAIM_COLS)[0], 'validator');
+  ok(view.rateMixed === true, 'claim view flags that rates vary');
+  ok(view.split.rows[0].amount === 416, 'month split priced per day');
+  ok(/more than one rate/.test(sent[0].body), 'validator email does not claim a single rate');
+}
+{
+  // a claim where every day is the agreed rate must look exactly as before
+  const { s, sent } = build();
+  const r = s.submit_(basePl({ rate: 22, months: [{ label: 'July 2026', entries: [{ day: 15, hours: 8, rate: 22 }] }] }));
+  const view = s.claimView_(s.rows_('Claims', s.CLAIM_COLS)[0], 'validator');
+  ok(r.total === '176.00' && view.rateMixed === false, 'same rate on every day is not flagged as mixed');
+  ok(/£22.00\/hr/.test(sent[0].body), 'validator email still quotes the single rate');
+}
+{
+  const { s } = build();
+  const bad = s.submit_(basePl({ months: [{ label: 'July 2026', entries: [{ day: 15, hours: 8, rate: 0 }] }] }));
+  ok(bad.ok === false && bad.errors.some((e) => /rate above 0/.test(e)), 'a zero per-day rate is rejected, not silently defaulted');
+}
+{
+  // claims submitted before per-day rates existed have no rates map
+  const { s } = build();
+  s.submit_(basePl({ rate: 20, months: [{ label: 'July 2026', entries: [{ day: 15, hours: 10 }] }] }));
+  const raw = s.rows_('Claims', s.CLAIM_COLS)[0];
+  const legacy = JSON.parse(raw.monthsJson);
+  delete legacy[0].rates;
+  raw.monthsJson = JSON.stringify(legacy);
+  const view = s.claimView_(raw, 'validator');
+  ok(view.split.rows[0].amount === 200 && view.rateMixed === false, 'an old claim with no rates map still prices off the agreed rate');
+}
+
 // --- cash log receipts ------------------------------------------------------
 // The acknowledger has no access to the deploying account's Drive, so the
 // receipt has to travel inline. A Drive URL in an <img> is what broke before.
