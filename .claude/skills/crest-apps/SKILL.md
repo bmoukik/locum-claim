@@ -5,19 +5,39 @@ description: Context, conventions, and current status for Crest Pharmacies' sing
 
 # Crest Pharmacies web apps — project context
 
-Last updated: 18 Jul 2026. **Phase 1 is LIVE — read "🟢 LIVE STATE" below
+Last updated: 30 Jul 2026. **Phase 1 is LIVE — read "🟢 LIVE STATE" below
 first.** The "SESSION HANDOFF — 16 Jul 2026" section at the bottom is the
 design history + decisions record (still binding on the don't-relitigate
 points), but its build steps are DONE.
 
+**Lyeba demoed and signed off both apps on 30 Jul 2026 — read
+"LYEBA DEMO — 30 Jul 2026" before changing either app.** Three changes
+shipped straight out of it and are on `main` but NOT yet in the deployed
+Apps Script (see "⚠️ UNDEPLOYED" below).
+
 **Remaining before real go-live** (testing period until then, personal
 emails only): Gmail labels+filters on moukik.cyber (manual); swap validator
-placeholders for real people via the console; confirm Ridgacre on/off;
-watch the first reminder/escalation fire (weekday 9am trigger); THEN swap
-the three global emails + validator emails to real company addresses, move
-hosting to the final domain, and reprint the QR posters (URL is in the ink).
+placeholders for real people via the console — **Lyeba owes the branch
+manager email list, chase from 31 Jul / start of w/c 3 Aug**; confirm
+Ridgacre on/off; watch the first reminder/escalation fire (weekday 9am
+trigger); THEN swap the three global emails + validator emails to real
+company addresses, move hosting to the final domain, and reprint the QR
+posters (URL is in the ink).
 Parked (unchanged): stock transfer; bulk-order toolkit (boss first);
 IR35/invoice-trail + GPhC/RTW verification (boss steers).
+
+## ⚠️ UNDEPLOYED — on `main`, not in the Apps Script editor
+
+`Code.gs` in this repo is ahead of the deployed web app. Until it is pasted
+in and the deployment version is bumped, three things are inert:
+
+1. **Receipt viewing** (`cashGet_` sends bytes inline) — without it the ack
+   page still shows a broken image.
+2. **Per-day rates** — the form collects them and the server bills every
+   hour at the agreed rate. **This one is a money bug while it is half
+   deployed**, since the page shows a total the backend will not honour.
+3. **`addHeadOfficeValidator()`** — does not exist until pasted, then must
+   be run once from the editor.
 
 Crest Pharmacies is a small UK community pharmacy chain: multiple branches in
 the same town(s), all **one company / one legal entity**. This repo holds a
@@ -77,6 +97,129 @@ below in this box is production fact, not plan.
   pre-selects the pharmacy + loads its validators (still changeable). QRs are
   error-correction Q; regenerate by re-running the segno snippet in git log /
   session notes if the estate or domain changes. **Domain change ⇒ reprint.**
+
+## LYEBA DEMO — 30 Jul 2026 (decisions; do not relitigate)
+
+Moukik demoed both apps to Lyeba. **Both approved and wanted.** Her verdicts,
+in her framing rather than ours:
+
+- **Locum app: unambiguous yes for drivers, dispensers, phlebotomists.**
+  They have no RP log, so nothing about them is contentious. A driver's claim
+  gets validated by the manager who booked the cover (she named Albert at
+  Humber, Ali at Clay) and then reaches her already checked.
+- **Locum app for pharmacists: yes, with the RP log as the open question.**
+  See "RP log" below.
+- **Cash log: yes — and the reason is narrower than the pitch.** Not the
+  monthly tally. **The receipt upload.** Her live gap is that ATL payout
+  reports exist but receipts do not: headings are junk ("a fan for £40" that
+  was actually a locum payout), and paper receipts die in a drawer. Receipt
+  capture at the moment of payout is the whole value.
+- **Scope: Crest's own shops only.** Partner pharmacies are out — the
+  partners organise shifts, check invoices and forward them, so approval
+  already happens before head office sees it. Extending to them is a separate
+  process and a later conversation.
+- **No deadline.** Verbatim: "If it's not something that's been in place, I'd
+  rather have it in place than have it perfect." Do not rush either app.
+
+### Corrections to earlier assumptions (these were wrong before 30 Jul)
+
+- **Tally the cash log against the ATL payout report, NOT Sage petty cash.**
+  Sage petty cash includes head-office spend (e.g. new shelves paid centrally)
+  that never touched a branch till. They are different numbers.
+- **The GPhC number is not a validation input.** Lyeba has never once checked
+  a claim against it — it is held so that a patient complaint can be traced to
+  who was RP that day. Do not build GPhC register verification; it solves a
+  problem nobody has.
+
+### Shipped out of this meeting (all on `main`, see ⚠️ UNDEPLOYED)
+
+- **Receipts now viewable by the acknowledger.** They were uploading to Drive
+  fine but the ack page rendered a Drive *page* URL in an `<img>`, so it was
+  always a broken image, and the file is private to the deploying account so
+  clicking through gave "request access". The bytes now travel inline against
+  the token the acknowledger already holds. Photos are downscaled to 1600px
+  JPEG client-side first (~4MB → ~200KB).
+- **Per-day rates.** Cover is not priced the same every day — bank holidays,
+  weekends and last-minute shifts cost more. The agreed rate stays the
+  default; a checkbox turns the day list into hours + £/hr, each pre-filled
+  from the agreed rate. Only days that differ are called out on the review
+  page, so the validator's eye goes to the exception.
+- **Head office validates at every branch** (`addHeadOfficeValidator()`).
+  Regular pharmacists (Tahir, Mariam, Janade, Hamza) have no manager who
+  booked their shift, so Lyeba approves them off the RP log.
+  **Deliberately a VALIDATOR at each branch, not a "Crest Pharmacies"
+  pharmacy** — which is how it came up in the meeting. A head-office
+  *pharmacy* would record head office as the place worked and throw away the
+  branch that carries the cost, defeating the P&L feed that is the whole
+  point. Do not "simplify" it back.
+
+### RP log — stays manual, and here is why (researched 30 Jul 2026)
+
+The RP log is a **legal record** under the Responsible Pharmacist Regulations
+2008 (name, GPhC number, time became RP, time ceased). Lyeba checks it daily;
+an inspector opening it is checking the pharmacy's compliance, not our payment
+trail. **The apps must never look like they replace it.**
+
+Their system is **Pharmsmart** — one word, no 'a', pharmsmart.co.uk.
+(**PharmaSmart** *with* an 'a' is an unrelated US blood-pressure-kiosk
+company. Do not confuse them, and do not research that spelling.) Findings,
+evidenced not assumed:
+
+- **No API.** Raw HTML of all 18 site pages: zero hits for export, csv,
+  excel, webhook, developer. `api.` and `developer.` subdomains return 200 but
+  it is **wildcard DNS** — an invented subdomain serves the same homepage.
+- **No export of any kind.** No CSV, Excel, scheduled report or download for
+  the RP log or anything else.
+- **What does exist:** the Head Office module surfaces "Missed RP Log
+  entries" across branches. That is exception monitoring, not the log rows.
+- **The only route is the vendor**: 0333 772 0679 / support@pharmsmart.co.uk.
+  Ask specifically for a bulk or scheduled RP-log extract at group level;
+  "do you have an API" gets answered with "we integrate with PMRs", which is
+  a different thing. Crest being ~24 branches and Pharmsmart already having
+  multi-branch customers is the leverage.
+- **Second door, unchecked:** if the branches run Cegedim **Pharmacy
+  Manager**, it has a built-in Responsible Pharmacist Report today (date
+  range, pharmacist filter, includes deleted/amended records). Per-branch, no
+  evidenced CSV. Nobody has confirmed which PMR Crest runs.
+
+**Blocker for any automation: the claim records hours, the RP log records
+times.** "8 hours on the 15th" cannot be matched against "signed in 09:00,
+out 18:00" — which is exactly the check Lyeba does by eye. Start/end times on
+the claim are the prerequisite for any future matching.
+
+Head-office-credential scraping was considered and is **not** the plan.
+Pharmsmart's terms have no anti-automation clause and clause 5.3 arguably
+permits internal use, but 6.1.4 forbids copying their "operating logic or
+database structure" — which is precisely what a scraper encodes. Reg 5(3)
+makes the owner an inspector of the record but "**at the premises**": an
+inspection right is not a right to a remote feed. And a scripted login breaks
+silently, which is the worst failure mode on a money path.
+
+### 🔴 The biggest gap: the apps do not feed the P&L at all
+
+Verified 30 Jul by grepping the whole `crest_P&L` pipeline for claim refs,
+cash log and the Crest Apps Data sheet: **zero hits.** Claims and cash entries
+land in their own spreadsheet and stop there. Both apps deliver the workflow
+and none of the reporting — while Lyeba named the reporting as the main
+benefit twice.
+
+**The trap when building it:** `build_full_csv.py` already routes Sage locum
+items to a canonical "Locum Expenses" row, and Sage petty cash already carries
+branch spend. Feeding app data in on top would **double-count** every payment
+that also reaches Sage. The interlink has to be *reconciliation* — app record
+matched against the Sage line, differences flagged — not addition. Settle that
+shape with Moukik before writing any code.
+
+### Open, not decided (do not build on a guess)
+
+- **Cash log categories vs ATL payout headings.** Ours are our own list.
+  Lyeba's complaint is junk ATL headings, so matching the two lists is what
+  makes them reconcile line for line. Needs her to send ATL's list.
+- **The float question.** £5 out of the till, £2 spent — is £3 going back?
+  She raised it and then said she did not know if it was worth doing. Cheapest
+  shape is amount-taken vs amount-spent. Do not build until she decides, or it
+  is a field nobody fills.
+- **Which PMR the branches run** (gates the Pharmacy Manager route above).
 
 ## The app files
 

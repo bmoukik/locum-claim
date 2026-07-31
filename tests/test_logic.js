@@ -392,6 +392,38 @@ function ok(cond, name) {
   ok(view.split.rows[0].amount === 200 && view.rateMixed === false, 'an old claim with no rates map still prices off the agreed rate');
 }
 
+// --- locum paid in cash: who agreed ------------------------------------------
+// Lyeba told the group on 30 Jul that locums are not paid in cash unless it was
+// agreed beforehand. The log has to carry who agreed, and say so when nobody did.
+{
+  const { s, sent } = build();
+  const base = { manager: 'Elliot', pharmacy: 'Clay', amount: 120, date: '2026-07-30', reason: 'Sat cover' };
+  const r = s.cashLog_(Object.assign({}, base, {
+    category: 'Locum / casual staff (cash)', person: 'A Locum', role: 'Dispenser', agreedBy: 'Lyeba',
+  }));
+  const row = s.rows_('Cash Log', s.CASH_COLS).filter((x) => x.ref === r.ref)[0];
+  ok(row.agreedBy === 'Lyeba', 'who agreed to the cash payment is stored');
+  ok(/agreed by Lyeba/.test(sent[0].body), 'the acknowledgement email names who agreed');
+}
+{
+  const { s, sent } = build();
+  // backend must not hard-fail — but it must not let it pass silently either
+  const r = s.cashLog_({
+    manager: 'Elliot', pharmacy: 'Clay', category: 'Locum / casual staff (cash)',
+    amount: 120, date: '2026-07-30', reason: 'Sat cover', person: 'A Locum', role: 'Dispenser',
+  });
+  ok(r.ok === true, 'a locum cash entry with nobody named still records');
+  ok(/nobody was named/.test(sent[0].body), 'but head office is told nobody agreed it');
+}
+{
+  const { s, sent } = build();
+  s.cashLog_({
+    manager: 'Elliot', pharmacy: 'Clay', category: 'Repairs / maintenance',
+    amount: 120, date: '2026-07-30', reason: 'Door handle',
+  });
+  ok(!/agreed/.test(sent[0].body), 'a non-locum entry says nothing about cash agreement');
+}
+
 // --- cash log receipts ------------------------------------------------------
 // The acknowledger has no access to the deploying account's Drive, so the
 // receipt has to travel inline. A Drive URL in an <img> is what broke before.

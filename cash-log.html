@@ -163,9 +163,11 @@ function renderForm(){
     cats.map(function(c){return '<option>'+esc(c)+'</option>'}).join('')+'</select>'+
   // locum-only compliance block
   '<div id="locwrap" style="display:none">'+
+    '<div class="warn">Locums should not be paid in cash unless it was agreed beforehand. If this one was, say who agreed it.</div>'+
     '<label>Who was paid?</label><input type="text" id="f_person" autocomplete="off">'+
     '<label>Role</label><select id="f_role"><option value="">— select —</option><option>Pharmacist</option><option>Dispenser</option><option>Driver</option><option>Other</option></select>'+
     '<div id="gphc_wrap" style="display:none"><label>GPhC registration number</label><input type="text" id="f_gphc" inputmode="numeric" maxlength="7"><p class="hint">7 digits.</p></div>'+
+    '<label>Who agreed to pay this in cash?</label><input type="text" id="f_agreedby" autocomplete="off" placeholder="name of whoever agreed it">'+
     '<div class="check"><input type="checkbox" id="f_rtw"><span>I have seen proof of their right to work in the UK</span></div>'+
   '</div>'+
   '<label>Amount paid (£)</label><input type="number" id="f_amount" step="0.01" min="0.01" inputmode="decimal">'+
@@ -250,6 +252,7 @@ function submit(){
     if(!$('f_person').value.trim())e.push('Who was paid');
     var role=$('f_role').value; if(!role)e.push('Role');
     if(role==='Pharmacist'&&!/^\d{7}$/.test($('f_gphc').value.trim()))e.push('GPhC number (7 digits)');
+    if(!$('f_agreedby').value.trim())e.push('Who agreed to pay this in cash');
     if(!$('f_rtw').checked)e.push('Right-to-work confirmation');
   }
   if(!(amt>0))e.push('Amount (£)');
@@ -270,6 +273,7 @@ function submit(){
   if(isLocumCat(cat)){
     payload.person=$('f_person').value.trim(); payload.role=$('f_role').value;
     payload.gphc=$('f_gphc').value.trim(); payload.rtw=true;
+    payload.agreedBy=$('f_agreedby').value.trim();
   }
   apiPost({action:'cashlog', payload:payload}).then(function(res){
     if(!res.ok){showErrors(res.errors||[res.message||'Something went wrong — try again.']);btn.disabled=false;btn.textContent='Save to cash log';return;}
@@ -319,6 +323,7 @@ function renderAck(token,c,errMsg){
     '<tr><td>Date</td><td>'+esc(c.date)+'</td></tr>'+
     '<tr><td>From till</td><td>'+(c.fromTill?'Yes':'No')+'</td></tr>'+
     (loc?'<tr><td>Paid to</td><td>'+esc(c.person||'')+' ('+esc(c.role||'')+')'+(c.gphc?'<br>GPhC '+esc(c.gphc):'')+(c.rtw?'<br>Right to work confirmed':'')+'</td></tr>':'')+
+    (loc?'<tr><td>Cash agreed by</td><td>'+(c.agreedBy?'<b>'+esc(c.agreedBy)+'</b>':'<b>Not stated</b> — locums should not be paid in cash unless it was agreed beforehand.')+'</td></tr>':'')+
     (c.notes?'<tr><td>Notes</td><td>'+esc(c.notes)+'</td></tr>':'')+
     '</table>'+
     (c.receipt?'<h3>Receipt</h3><img class="thumb" src="'+esc(c.receipt)+'">'

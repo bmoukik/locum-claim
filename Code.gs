@@ -85,7 +85,9 @@ var CLAIM_COLS = ['ref', 'submittedAt', 'status', 'locumName', 'locumEmail', 'lo
   'approvedBy', 'approvedAt', 'rejectReason', 'paidBy', 'paidAt',
   'raisedBy', 'raisedTo', 'raisedReason', 'raisedAt', 'remindedAt', 'escalatedAt'];
 var CASH_COLS = ['ref', 'at', 'status', 'pharmacy', 'manager', 'category', 'amount', 'date', 'reason', 'fromTill',
-  'receiptUrl', 'notes', 'person', 'role', 'gphc', 'rtw', 'ackAt', 'queryReason'];
+  'receiptUrl', 'notes', 'person', 'role', 'gphc', 'rtw', 'ackAt', 'queryReason',
+  // appended, never inserted — column order is the sheet's layout and old rows keep theirs
+  'agreedBy'];
 
 // ---------------------------------------------------------------------------
 // HTTP entry points
@@ -560,12 +562,17 @@ function cashLog_(pl) {
   row.amount = pl.amount; row.date = pl.date; row.reason = pl.reason; row.fromTill = !!pl.fromTill;
   row.receiptUrl = receiptUrl; row.notes = pl.notes || '';
   row.person = pl.person || ''; row.role = pl.role || ''; row.gphc = pl.gphc || ''; row.rtw = !!pl.rtw;
+  row.agreedBy = pl.agreedBy || '';
   sheet_('Cash Log').appendRow(CASH_COLS.map(function (k) { return row[k]; }));
 
   if (pending) {
     var tok = mintToken_('cash', ref, 'ack');
     sendMail_(c.emails.cashAck, 'Cash entry ' + ref + ' £' + money_(pl.amount) + ' needs acknowledgement',
       pl.manager + ' at ' + pl.pharmacy + ' logged £' + money_(pl.amount) + ' from the till: ' + pl.category + ' — "' + pl.reason + '".\n' +
+      (/^Locum/.test(pl.category || '')
+        ? (pl.agreedBy ? 'Paying this locum in cash was agreed by ' + pl.agreedBy + '.\n'
+                       : 'NOTE: nobody was named as having agreed to pay this locum in cash.\n')
+        : '') +
       'This is at or over the £' + c.cash.threshold + ' threshold, so it needs your acknowledgement:\n' +
       cashUrl_() + '?token=' + tok);
   }
